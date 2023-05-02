@@ -5,15 +5,6 @@ use poker::{card, Card};
 use std::fmt::{Debug, Formatter};
 use std::iter::zip;
 
-fn normalize(v: &Vec<f32>) -> Vec<f32> {
-    let norm: f32 = v.iter().sum();
-    if norm != 0.0 {
-        v.iter().map(|&elem| elem / norm).collect()
-    } else {
-        vec![1.0 / (v.len() as f32); v.len()]
-    }
-}
-
 static CARD_ORDER: [Card; 3] = [
     card!(Jack, Hearts),
     card!(Queen, Hearts),
@@ -25,12 +16,12 @@ fn card_index(card: Card) -> usize {
 }
 
 #[derive(Debug)]
-pub(crate) struct Game {
-    root: State,
+pub(crate) struct Game<const M: usize> {
+    root: State<M>,
 }
 
-impl Game {
-    pub fn new(root: State) -> Self {
+impl<const M: usize> Game<M> {
+    pub fn new(root: State<M>) -> Self {
         Game { root }
     }
 
@@ -47,77 +38,86 @@ impl Game {
 
 // holds historic winnings of each move and hand
 #[derive(Clone)]
-pub(crate) struct Strategy {
-    regrets: Vec<f32>,
-    strategy_sum: Vec<f32>,
+pub(crate) struct Strategy<const M: usize> {
+    regrets: [f32; M],
+    strategy_sum: [f32; M],
 }
 
-impl Debug for Strategy {
+impl<const M: usize> Debug for Strategy<M> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.get_average_strategy())
     }
 }
 
-impl Strategy {
-    pub fn new(num_actions: usize) -> Self {
+impl<const M: usize> Strategy<M> {
+    pub fn new() -> Self {
         Strategy {
-            regrets: vec![0.0; num_actions],
-            strategy_sum: vec![0.0; num_actions],
+            regrets: [0.0; M],
+            strategy_sum: [0.0; M],
         }
     }
 
-    pub fn update_add(&mut self, update: Vec<f32>) {
+    pub fn update_add(&mut self, update: &[f32]) {
         for i in 0..self.regrets.len() {
             self.regrets[i] += update[i];
         }
     }
 
-    pub fn get_strategy(&mut self, realization_weight: f32) -> Vec<f32> {
-        let regret_match = self
-            .regrets
-            .clone()
-            .into_iter()
-            .map(|elem| if elem < 0.0 { 0.0 } else { elem })
-            .collect();
-        let normalized = normalize(&regret_match);
+    pub fn get_strategy(&mut self, realization_weight: f32) -> [f32; M] {
+        let mut regret_match: [f32; M] = self.regrets.clone();
+        regret_match
+            .iter_mut()
+            .for_each(|elem| *elem = if *elem > 0.0 { *elem } else { 0.0 });
+        let normalized = Self::normalize(&regret_match);
         for i in 0..self.strategy_sum.len() {
             self.strategy_sum[i] += normalized[i] * realization_weight;
         }
         normalized
     }
 
-    pub fn get_average_strategy(&self) -> Vec<f32> {
-        normalize(&self.strategy_sum)
+    pub fn get_average_strategy(&self) -> [f32; M] {
+        Self::normalize(&self.strategy_sum)
+    }
+
+    fn normalize(v: &[f32; M]) -> [f32; M] {
+        let norm: f32 = v.iter().sum();
+        if norm != 0.0 {
+            let mut res = v.clone();
+            res.iter_mut().for_each(|elem| *elem /= norm);
+            res
+        } else {
+            [1.0 / (v.len() as f32); M]
+        }
     }
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct State {
+pub(crate) struct State<const M: usize> {
     terminal: TerminalState,
     sbbet: f32,
     bbbet: f32,
     next_to_act: Player,
-    card_strategies: Vec<Strategy>,
-    actions: Vec<State>,
+    card_strategies: Vec<Strategy<M>>,
+    actions: Vec<State<M>>,
 }
 
-impl State {
+impl<const M: usize> State<M> {
     pub fn new(terminal: TerminalState, sbbet: f32, bbbet: f32, next_to_act: Player) -> Self {
         State {
             terminal,
             sbbet,
             bbbet,
             next_to_act,
-            card_strategies: vec![Strategy::new(2); 3],
+            card_strategies: vec![Strategy::new(); 3],
             actions: vec![],
         }
     }
 
-    pub fn add_action(&mut self, state: State) {
+    pub fn add_action(&mut self, state: State<M>) {
         self.actions.push(state);
     }
 
-    pub fn get_action(&self, action: Action) -> State {
+    pub fn get_action(&self, action: Action) -> State<M> {
         match self.next_to_act {
             Small => match action {
                 Action::Fold => State {
@@ -133,7 +133,7 @@ impl State {
                     sbbet: self.sbbet,
                     bbbet: self.bbbet,
                     next_to_act: Big,
-                    card_strategies: vec![Strategy::new(2); 3],
+                    card_strategies: vec![Strategy::new(); 3],
                     actions: vec![],
                 },
                 Action::Call => State {
@@ -150,7 +150,7 @@ impl State {
                     sbbet: self.bbbet + 1.0,
                     bbbet: self.bbbet,
                     next_to_act: Big,
-                    card_strategies: vec![Strategy::new(2); 3],
+                    card_strategies: vec![Strategy::new(); 3],
                     actions: vec![],
                 },
             },
@@ -168,7 +168,7 @@ impl State {
                     sbbet: self.sbbet,
                     bbbet: self.bbbet,
                     next_to_act: Small,
-                    card_strategies: vec![Strategy::new(2); 3],
+                    card_strategies: vec![Strategy::new(); 3],
                     actions: vec![],
                 },
                 Action::Call => State {
@@ -185,14 +185,14 @@ impl State {
                     sbbet: self.sbbet,
                     bbbet: self.sbbet + 1.0,
                     next_to_act: Small,
-                    card_strategies: vec![Strategy::new(2); 3],
+                    card_strategies: vec![Strategy::new(); 3],
                     actions: vec![],
                 },
             },
         }
     }
 
-    pub fn get_card_strategy(&mut self, card: Card) -> &mut Strategy {
+    pub fn get_card_strategy(&mut self, card: Card) -> &mut Strategy<M> {
         let i = card_index(card);
         &mut self.card_strategies[i]
     }
@@ -216,10 +216,11 @@ impl State {
                 };
                 // get avg strategy and individual payoffs
                 let mut avgstrat = 0.0;
-                let mut payoffs = Vec::new();
+                let mut payoffs = [0.0; 2];
 
                 let strategy = self.get_card_strategy(card).get_strategy(other_prob);
 
+                let mut i = 0;
                 for (next, action_prob) in zip(self.actions.iter_mut(), strategy) {
                     let new_prob = prob * action_prob;
 
@@ -229,16 +230,17 @@ impl State {
                     };
 
                     avgstrat += util * action_prob;
-                    payoffs.push(util);
+                    payoffs[i] = util;
+                    i += 1;
                 }
                 // update strategy
-                let mut update = Vec::new();
-                for util in payoffs {
+                let mut update = [0.0; 2];
+                for (i, util) in payoffs.iter().enumerate() {
                     let diff = util - avgstrat;
                     let regret = diff * other_prob;
-                    update.push(regret);
+                    update[i] = regret;
                 }
-                self.get_card_strategy(card).update_add(update);
+                self.get_card_strategy(card).update_add(&update);
                 return avgstrat;
             }
 

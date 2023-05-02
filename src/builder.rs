@@ -2,7 +2,7 @@ use crate::game::Action::*;
 use crate::game::Player::*;
 use crate::game::*;
 
-pub(crate) fn kuhn() -> Game {
+pub(crate) fn kuhn() -> Game<2> {
     let mut root = State::new(TerminalState::NonTerminal, 1.0, 1.0, Small);
 
     let mut check = root.get_action(Check);
