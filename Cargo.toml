@@ -5,10 +5,12 @@ edition = "2021"
 
 [profile.release]
 opt-level = 3
+lto = true
+codegen-units = 1
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-poker = "0.4"
+poker = { git = "https://github.com/gustafbergmark/poker.git" }
 serde = "1.0.158"
 itertools = "0.10.5"

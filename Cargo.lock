@@ -43,8 +43,7 @@ checksum = "99227334921fae1a979cf0bfdfcc6b3e5ce376ef57e16fb6fb3ea2ed6095f80c"
 [[package]]
 name = "poker"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed7ba8172e1695bdb3c21cb11c5b688572c9095dc2c6d72bc16d200c45f35e7a"
+source = "git+https://github.com/gustafbergmark/poker.git#3b278649936cc9f212bf4edd0c563beb676e1e8b"
 dependencies = [
  "cfg-if",
  "itertools",

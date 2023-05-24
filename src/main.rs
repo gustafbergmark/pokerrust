@@ -1,16 +1,18 @@
 use std::time::Instant;
 
 mod builder;
+mod enums;
 mod game;
+mod state;
+mod strategy;
 
 fn main() {
-    let mut game = builder::kuhn();
+    let mut game = builder::flop_poker();
+    dbg!("Game created");
     let start = Instant::now();
-    for i in 1..=1_000_000 {
-        let _res = game.perform_iter();
-        if i % 10_000 == 0 {
-            dbg!(i, _res);
-        }
+    for i in 1..=1 {
+        let _res = game.perform_iter(i as f32);
     }
+    //dbg!(&game);
     dbg!(start.elapsed().as_millis());
 }
