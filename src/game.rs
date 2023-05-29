@@ -1,38 +1,41 @@
+use crate::evaluator;
+use crate::evaluator::Evaluator;
 use crate::state::State;
 use itertools::Itertools;
-use poker::{card, Card, Evaluator};
+use poker::{card, Card};
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
+use std::time::Instant;
 
-pub(crate) struct Game<const M: usize> {
-    root: State<M>,
-    card_order: HashMap<[Card; 2], usize>,
-    evaluator: Evaluator,
+pub(crate) struct Game {
+    root: State,
+    card_order: HashMap<u64, usize>,
+    evaluator: evaluator::Evaluator,
 }
 
-impl<const M: usize> Debug for Game<M> {
+impl Debug for Game {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.root.fmt(f)
     }
 }
 
-impl<const M: usize> Game<M> {
-    pub fn new(root: State<M>) -> Self {
-        let test_pairs: Vec<([Card; 2], usize)> = vec![
+impl Game {
+    pub fn new(root: State, evaluator: Evaluator) -> Self {
+        let _test_pairs: Vec<([Card; 2], usize)> = vec![
             ([card!(Jack, Hearts), card!(Jack, Clubs)], 0),
             ([card!(Queen, Hearts), card!(Queen, Clubs)], 1),
             ([card!(King, Hearts), card!(King, Clubs)], 2),
         ];
-        let all_pairs: Vec<([Card; 2], usize)> = Card::generate_deck()
+        let all_pairs: Vec<(u64, usize)> = Card::generate_deck()
             .combinations(2)
             .enumerate()
-            .map(|(pos, cards)| (cards.try_into().unwrap(), pos))
+            .map(|(pos, cards)| (evaluator.cards_to_u64(&cards), pos))
             .collect();
-        let card_order: HashMap<[Card; 2], usize> = all_pairs.into_iter().collect();
+        let card_order: HashMap<u64, usize> = all_pairs.into_iter().collect();
         Game {
             root,
             card_order,
-            evaluator: Evaluator::new(),
+            evaluator,
         }
     }
 
@@ -40,10 +43,14 @@ impl<const M: usize> Game<M> {
         let hands = self.card_order.keys().tuple_combinations();
         let mut count = 0;
         let mut ev = 0.0;
+        let start = Instant::now();
         for (&c1, &c2) in hands {
+            if c1 & c2 != 0 {
+                continue;
+            }
             ev += self.root.evaluate_state(
-                &c1,
-                &c2,
+                c1,
+                c2,
                 1.0,
                 1.0,
                 &self.evaluator,
@@ -51,8 +58,8 @@ impl<const M: usize> Game<M> {
                 &self.card_order,
             );
             ev += self.root.evaluate_state(
-                &c2,
-                &c1,
+                c2,
+                c1,
                 1.0,
                 1.0,
                 &self.evaluator,
@@ -60,11 +67,12 @@ impl<const M: usize> Game<M> {
                 &self.card_order,
             );
             count += 1;
-            if count % 100 == 0 {
+            if count % 10 == 0 {
                 println!(
-                    "Finished {} hands, {}% done",
+                    "Finished {} hands, {}% done, time per hand: {} ms",
                     count,
-                    count as f64 / 878475.0 * 100.0
+                    count as f64 / 878475.0 * 100.0,
+                    start.elapsed().as_millis() / count
                 )
             }
         }
