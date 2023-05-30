@@ -9,7 +9,7 @@ pub struct Evaluator {
 
 impl Evaluator {
     pub fn new() -> Self {
-        let evaluator = poker::Evaluator::new();
+        //let evaluator = poker::Evaluator::new();
         let deck = Card::generate_deck();
 
         let mut card_nums = HashMap::new();
@@ -18,12 +18,12 @@ impl Evaluator {
         }
 
         let mut hands = Vec::new();
-        for hand in deck.combinations(5) {
+        for hand in deck.combinations(1) {
             let mut num_hand = 0;
             for &card in &hand {
                 num_hand |= card_nums.get(&card).unwrap();
             }
-            hands.push((evaluator.evaluate(hand).unwrap(), num_hand));
+            hands.push((num_hand, num_hand));
         }
         hands.sort();
 

@@ -12,9 +12,9 @@ fn main() {
     //let eval = evaluator::Evaluator::new();
     let mut game = builder::flop_poker();
     dbg!("Game created");
-    for i in 1..=1 {
+    for i in 1..=1_000_000 {
         let _res = game.perform_iter(i as f32);
     }
-    //dbg!(&game);
+    dbg!(&game);
     dbg!(start.elapsed().as_millis());
 }
