@@ -44,8 +44,8 @@ impl Game {
     pub fn perform_iter(&mut self, iteration_weight: f32) -> ([f32; 1326], [f32; 1326]) {
         let start = Instant::now();
         let (_, _, exp_sb) = self.root.evaluate_state(
-            [1.0; 1326],
-            [1.0; 1326],
+            &[1.0; 1326],
+            &[1.0; 1326],
             &self.evaluator,
             iteration_weight,
             &self.card_order,
@@ -54,8 +54,8 @@ impl Game {
         );
 
         let (util_sb, util_bb, exp_bb) = self.root.evaluate_state(
-            [1.0; 1326],
-            [1.0; 1326],
+            &[1.0; 1326],
+            &[1.0; 1326],
             &self.evaluator,
             iteration_weight,
             &self.card_order,

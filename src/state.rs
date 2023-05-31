@@ -8,7 +8,6 @@ use crate::strategy::Strategy;
 use itertools::Itertools;
 use poker::Suit::{Clubs, Diamonds, Hearts, Spades};
 use poker::{Card, Suit};
-use std::cmp::max_by;
 use std::collections::HashSet;
 use std::iter::zip;
 use std::time::Instant;
@@ -280,8 +279,8 @@ impl State {
 
     pub fn evaluate_state(
         &mut self,
-        range_sb: [f32; 1326],
-        range_bb: [f32; 1326],
+        range_sb: &[f32; 1326],
+        range_bb: &[f32; 1326],
         evaluator: &Evaluator,
         iteration_weight: f32,
         card_order: &Vec<u64>,
@@ -309,19 +308,19 @@ impl State {
                     .card_strategies
                     .as_mut()
                     .unwrap()
-                    .get_strategy(1.0 /*???*/, iteration_weight);
+                    .get_strategy(iteration_weight);
 
                 for (a, (next, action_prob)) in
                     zip(self.next_states.iter_mut(), strategy).enumerate()
                 {
-                    let mut new_range = range;
+                    let mut new_range = *range;
                     for i in 0..1326 {
                         new_range[i] *= action_prob[i];
                     }
 
                     let (util_sb, util_bb, exploit) = match self.next_to_act {
                         Small => next.evaluate_state(
-                            new_range,
+                            &new_range,
                             other_range,
                             evaluator,
                             iteration_weight,
@@ -331,7 +330,7 @@ impl State {
                         ),
                         Big => next.evaluate_state(
                             other_range,
-                            new_range,
+                            &new_range,
                             evaluator,
                             iteration_weight,
                             card_order,
@@ -350,14 +349,11 @@ impl State {
                     }
                     if self.next_to_act == updating_player {
                         for i in 0..1326 {
-                            //???????????????????
                             exploitability[i] += exploit[i];
                         }
                     } else {
                         for i in 0..1326 {
-                            exploitability[i] = max_by(exploitability[i], exploit[i], |&a, &b| {
-                                a.partial_cmp(&b).unwrap()
-                            });
+                            exploitability[i] = exploitability[i].max(exploit[i]);
                         }
                     }
                     payoffs[a][..].copy_from_slice(&util);
@@ -425,8 +421,7 @@ impl State {
                             })
                             .sorted() // could be done quicker, saves max 1 sec
                             .collect();
-                        let groups: Vec<&[(u16, usize)]> =
-                            sorted.group_by(|&(a, _), &(b, _)| a == b).collect();
+                        let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
 
                         let mut collisions_sb = [0.0; 52];
                         let mut collisions_bb = [0.0; 52];
@@ -434,7 +429,7 @@ impl State {
                         let mut cum_sb = 0.0;
                         let mut cum_bb = 0.0;
 
-                        for &group in &groups {
+                        for group in groups {
                             let mut current_cum_sb = 0.0;
                             let mut current_cum_bb = 0.0;
 
@@ -472,7 +467,9 @@ impl State {
                         let mut cum_sb = 0.0;
                         let mut cum_bb = 0.0;
 
-                        for &group in groups.iter().rev() {
+                        let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
+
+                        for group in groups.rev() {
                             let mut current_cum_sb = 0.0;
                             let mut current_cum_bb = 0.0;
 
@@ -605,11 +602,16 @@ impl State {
                             permuter.permute(permutation, res.2),
                         );
                         for i in 0..total.0.len() {
-                            total.0[i] += permuted_res.0[i] / 22100.0; // 52 choose 3
-                            total.1[i] += permuted_res.1[i] / 22100.0;
-                            total.2[i] += permuted_res.2[i] / 22100.0;
+                            total.0[i] += permuted_res.0[i];
+                            total.1[i] += permuted_res.1[i];
+                            total.2[i] += permuted_res.2[i];
                         }
                     }
+                }
+                for i in 0..total.0.len() {
+                    total.0[i] /= 22100.0; // 52 choose 3
+                    total.1[i] /= 22100.0;
+                    total.2[i] /= 22100.0;
                 }
                 total
             }

@@ -32,17 +32,13 @@ impl Strategy {
         }
     }
 
-    pub fn get_strategy(
-        &mut self,
-        realization_weight: f32,
-        iteration_weight: f32,
-    ) -> [[f32; 1326]; 2] {
+    pub fn get_strategy(&mut self, iteration_weight: f32) -> [[f32; 1326]; 2] {
         let regret_match: [[f32; 1326]; 2] = self.regrets.clone();
         let normalized = Self::normalize(&regret_match);
         for i in 0..2 {
             for j in 0..1326 {
                 self.strategy_sum[i][j] *= iteration_weight / (iteration_weight + 1.0);
-                self.strategy_sum[i][j] += normalized[i][j] * realization_weight;
+                self.strategy_sum[i][j] += normalized[i][j];
             }
         }
         normalized

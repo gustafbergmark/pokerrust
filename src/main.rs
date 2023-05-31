@@ -6,6 +6,7 @@ mod enums;
 mod evaluator;
 mod game;
 mod permutation_handler;
+mod simd;
 mod state;
 mod strategy;
 
