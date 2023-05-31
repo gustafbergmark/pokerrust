@@ -1,3 +1,4 @@
+use crate::vector::Vector;
 use itertools::Itertools;
 use poker::Suit::*;
 use poker::{Card, Suit};
@@ -66,12 +67,12 @@ impl PermutationHandler {
         result
     }
 
-    pub fn permute(&self, permutation: [Suit; 4], v: [f32; 1326]) -> [f32; 1326] {
+    pub fn permute(&self, permutation: [Suit; 4], v: Vector) -> Vector {
         let p = *self.map.get(&permutation).unwrap();
         let mut result = [0.0; 1326];
-        for (i, value) in zip(p, v) {
+        for (i, value) in zip(p, v.values) {
             result[i] = value;
         }
-        result
+        Vector { values: result }
     }
 }

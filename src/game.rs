@@ -2,6 +2,7 @@ use crate::enums::Player::{Big, Small};
 use crate::evaluator::Evaluator;
 use crate::permutation_handler::PermutationHandler;
 use crate::state::State;
+use crate::vector::Vector;
 use itertools::Itertools;
 use poker::{card, Card};
 use std::fmt::{Debug, Formatter};
@@ -41,31 +42,33 @@ impl Game {
         }
     }
 
-    pub fn perform_iter(&mut self, iteration_weight: f32) -> ([f32; 1326], [f32; 1326]) {
+    pub fn perform_iter(&mut self, iteration_weight: f32, calc_exploit: bool) -> [Vector; 2] {
         let start = Instant::now();
-        let (_, _, exp_sb) = self.root.evaluate_state(
-            &[1.0; 1326],
-            &[1.0; 1326],
+        let [_, _, exp_sb] = self.root.evaluate_state(
+            &Vector::ones(),
+            &Vector::ones(),
             &self.evaluator,
             iteration_weight,
             &self.card_order,
             Small,
             &self.permuter,
+            calc_exploit,
         );
 
-        let (util_sb, util_bb, exp_bb) = self.root.evaluate_state(
-            &[1.0; 1326],
-            &[1.0; 1326],
+        let [util_sb, util_bb, exp_bb] = self.root.evaluate_state(
+            &Vector::ones(),
+            &Vector::ones(),
             &self.evaluator,
             iteration_weight,
             &self.card_order,
             Big,
             &self.permuter,
+            calc_exploit,
         );
         //dbg!(&self.root.card_strategies);
-        let sb_avg = exp_sb.iter().sum::<f32>() / exp_sb.len() as f32 / 1225.0; // 1225 = 50 choose 2, the number of hands each hand play against
-        let bb_avg = exp_bb.iter().sum::<f32>() / exp_bb.len() as f32 / 1225.0;
-        dbg!(sb_avg + bb_avg, start.elapsed().as_secs_f32());
-        (util_sb, util_bb)
+        let sb_avg = exp_sb.values.iter().sum::<f32>() / 1326.0 / 1225.0; // 1225 = 50 choose 2, the number of hands each hand play against
+        let bb_avg = exp_bb.values.iter().sum::<f32>() / 1326.0 / 1225.0;
+        dbg!(calc_exploit, sb_avg + bb_avg, start.elapsed().as_secs_f32());
+        [util_sb, util_bb]
     }
 }

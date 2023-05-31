@@ -14,3 +14,4 @@ codegen-units = 1
 poker = { git = "https://github.com/gustafbergmark/poker.git" }
 serde = "1.0.158"
 itertools = "0.10.5"
+rayon = "1.7.0"

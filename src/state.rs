@@ -5,12 +5,15 @@ use crate::enums::*;
 use crate::evaluator::Evaluator;
 use crate::permutation_handler::PermutationHandler;
 use crate::strategy::Strategy;
+use crate::vector::Vector;
 use itertools::Itertools;
 use poker::Suit::{Clubs, Diamonds, Hearts, Spades};
 use poker::{Card, Suit};
+//use rayon::iter::IndexedParallelIterator;
+//use rayon::iter::IntoParallelRefMutIterator;
+//use rayon::iter::ParallelIterator;
 use std::collections::HashSet;
 use std::iter::zip;
-use std::time::Instant;
 
 #[derive(Clone, Debug)]
 pub(crate) struct State {
@@ -279,14 +282,15 @@ impl State {
 
     pub fn evaluate_state(
         &mut self,
-        range_sb: &[f32; 1326],
-        range_bb: &[f32; 1326],
+        range_sb: &Vector,
+        range_bb: &Vector,
         evaluator: &Evaluator,
         iteration_weight: f32,
         card_order: &Vec<u64>,
         updating_player: Player,
         permuter: &PermutationHandler,
-    ) -> ([f32; 1326], [f32; 1326], [f32; 1326]) {
+        calc_exploit: bool,
+    ) -> [Vector; 3] {
         //(util of sb, util of bb, exploitability of updating player)
         match self.terminal {
             NonTerminal => {
@@ -295,30 +299,78 @@ impl State {
                     Big => (range_bb, range_sb),
                 };
                 // get avg strategy and individual payoffs
-                let mut avgstrat = [0.0; 1326];
-                let mut other_util = [0.0; 1326];
+                let mut avgstrat = Vector::default();
+                let mut other_util = Vector::default();
                 let mut exploitability = if self.next_to_act == updating_player {
-                    [0.0; 1326]
+                    Vector::default()
                 } else {
-                    [f32::NEG_INFINITY; 1326]
+                    Vector {
+                        values: [f32::NEG_INFINITY; 1326],
+                    }
                 };
-                let mut payoffs = [[0.0; 1326]; 2];
+                let mut payoffs = [Vector::default(); 2];
 
                 let strategy = self
                     .card_strategies
                     .as_mut()
                     .unwrap()
-                    .get_strategy(iteration_weight);
+                    .get_strategy(iteration_weight, calc_exploit);
+
+                /*let updates: Vec<(Vector, Vector, Vector, Vector)> = self
+                    .next_states
+                    .par_iter_mut()
+                    .zip(strategy)
+                    .map(|(next, action_prob)| {
+                        let new_range = *range * action_prob;
+
+                        let [util_sb, util_bb, exploit] = match self.next_to_act {
+                            Small => next.evaluate_state(
+                                &new_range,
+                                other_range,
+                                evaluator,
+                                iteration_weight,
+                                card_order,
+                                updating_player,
+                                permuter,
+                            ),
+                            Big => next.evaluate_state(
+                                other_range,
+                                &new_range,
+                                evaluator,
+                                iteration_weight,
+                                card_order,
+                                updating_player,
+                                permuter,
+                            ),
+                        };
+                        let (util, other) = match self.next_to_act {
+                            Small => (util_sb, util_bb),
+                            Big => (util_bb, util_sb),
+                        };
+
+                        return (util, util * action_prob, other, exploit);
+                    })
+                    .collect();
+                for (a, (util, avg_update, other, exploit)) in updates.into_iter().enumerate() {
+                    payoffs[a].values[..].copy_from_slice(&util.values);
+                    avgstrat += avg_update;
+                    other_util += other;
+                    if self.next_to_act == updating_player {
+                        exploitability += exploit
+                    } else {
+                        for i in 0..1326 {
+                            exploitability.values[i] =
+                                exploitability.values[i].max(exploit.values[i]);
+                        }
+                    }
+                }*/
 
                 for (a, (next, action_prob)) in
                     zip(self.next_states.iter_mut(), strategy).enumerate()
                 {
-                    let mut new_range = *range;
-                    for i in 0..1326 {
-                        new_range[i] *= action_prob[i];
-                    }
+                    let new_range = *range * action_prob;
 
-                    let (util_sb, util_bb, exploit) = match self.next_to_act {
+                    let [util_sb, util_bb, exploit] = match self.next_to_act {
                         Small => next.evaluate_state(
                             &new_range,
                             other_range,
@@ -327,6 +379,7 @@ impl State {
                             card_order,
                             updating_player,
                             permuter,
+                            calc_exploit,
                         ),
                         Big => next.evaluate_state(
                             other_range,
@@ -336,79 +389,46 @@ impl State {
                             card_order,
                             updating_player,
                             permuter,
+                            calc_exploit,
                         ),
                     };
                     let (util, other) = match self.next_to_act {
                         Small => (util_sb, util_bb),
                         Big => (util_bb, util_sb),
                     };
-
-                    for i in 0..1326 {
-                        avgstrat[i] += util[i] * action_prob[i];
-                        other_util[i] += other[i];
-                    }
+                    payoffs[a].values[..].copy_from_slice(&util.values);
+                    avgstrat += util * action_prob;
+                    other_util += other;
                     if self.next_to_act == updating_player {
-                        for i in 0..1326 {
-                            exploitability[i] += exploit[i];
-                        }
+                        exploitability += exploit
                     } else {
                         for i in 0..1326 {
-                            exploitability[i] = exploitability[i].max(exploit[i]);
+                            exploitability.values[i] =
+                                exploitability.values[i].max(exploit.values[i]);
                         }
                     }
-                    payoffs[a][..].copy_from_slice(&util);
                 }
                 // update strategy
                 if self.next_to_act == updating_player {
-                    let mut update = [[0.0; 1326]; 2];
+                    let mut update = [Vector::default(); 2];
                     for (i, &util) in payoffs.iter().enumerate() {
-                        for card in 0..1326 {
-                            let regret = util[card] - avgstrat[card];
-                            update[i][card] = regret;
-                        }
+                        update[i] = util - avgstrat;
                     }
-                    self.card_strategies.as_mut().unwrap().update_add(&update);
+                    self.card_strategies
+                        .as_mut()
+                        .unwrap()
+                        .update_add(&update, calc_exploit);
                 }
 
                 match self.next_to_act {
-                    Small => (avgstrat, other_util, exploitability),
-                    Big => (other_util, avgstrat, exploitability),
+                    Small => [avgstrat, other_util, exploitability],
+                    Big => [other_util, avgstrat, exploitability],
                 }
             }
 
             Showdown | BBWins | SBWins => {
-                /*let _start1 = Instant::now();
-                let mut sb_res = [0.0; 1326];
-                let mut bb_res = [0.0; 1326];
-                for (i1, &hand1) in card_order.iter().enumerate() {
-                    for (i2, &hand2) in card_order.iter().enumerate() {
-                        if hand1 & hand2 > 0 {
-                            continue;
-                        }
-                        if hand1 & self.cards > 0 || hand2 & self.cards > 0 {
-                            continue;
-                        }
-                        if ((evaluator.evaluate(hand1 | self.cards).unwrap()
-                            > evaluator.evaluate(hand2 | self.cards).unwrap())
-                            && self.terminal != BBWins)
-                            || self.terminal == SBWins
-                        {
-                            sb_res[i1] += self.bbbet * range_bb[i2];
-                            bb_res[i2] -= self.bbbet * range_sb[i1];
-                        } else if (evaluator.evaluate(hand1 | self.cards).unwrap()
-                            < evaluator.evaluate(hand2 | self.cards).unwrap())
-                            || self.terminal == BBWins
-                        {
-                            sb_res[i1] -= self.sbbet * range_bb[i2];
-                            bb_res[i2] += self.sbbet * range_sb[i1];
-                        };
-                    }
-                }
-                //dbg!(_start1.elapsed().as_micros());*/
-
-                let _start2 = Instant::now();
-                let mut sb_res2 = [0.0; 1326];
-                let mut bb_res2 = [0.0; 1326];
+                let mut sb_res2 = Vector::default();
+                let mut bb_res2 = Vector::default();
 
                 match self.terminal {
                     Showdown => {
@@ -518,7 +538,7 @@ impl State {
                                 collisions_bb[c] += range_sb[index];
                             }
                         }
-                        for index in 0..sb_res2.len() {
+                        for index in 0..1326 {
                             if card_order[index] & self.cards > 0 {
                                 continue;
                             }
@@ -530,8 +550,14 @@ impl State {
                                 bb_res2[index] -= collisions_bb[card];
                             }
                         }
-                        sb_res2.iter_mut().for_each(|elem| *elem *= self.bbbet);
-                        bb_res2.iter_mut().for_each(|elem| *elem *= -self.bbbet);
+                        sb_res2
+                            .values
+                            .iter_mut()
+                            .for_each(|elem| *elem *= self.bbbet);
+                        bb_res2
+                            .values
+                            .iter_mut()
+                            .for_each(|elem| *elem *= -self.bbbet);
                     }
                     BBWins => {
                         let mut sb_sum = 0.0;
@@ -550,7 +576,7 @@ impl State {
                                 collisions_bb[c] += range_sb[index];
                             }
                         }
-                        for index in 0..sb_res2.len() {
+                        for index in 0..1326 {
                             if card_order[index] & self.cards > 0 {
                                 continue;
                             }
@@ -562,28 +588,26 @@ impl State {
                                 bb_res2[index] -= collisions_bb[card];
                             }
                         }
-                        sb_res2.iter_mut().for_each(|elem| *elem *= -self.sbbet);
-                        bb_res2.iter_mut().for_each(|elem| *elem *= self.sbbet);
+                        sb_res2
+                            .values
+                            .iter_mut()
+                            .for_each(|elem| *elem *= -self.sbbet);
+                        bb_res2
+                            .values
+                            .iter_mut()
+                            .for_each(|elem| *elem *= self.sbbet);
                     }
                     _ => todo!(),
                 }
-                //dbg!(_start2.elapsed().as_micros());
 
-                // FIX COLLISIONS FOR TWO PAIR HANDS
-                /*assert!(zip(sb_res, sb_res2)
-                    .map(|(a, b)| (a - b).abs())
-                    .all(|x| x <= 1e-6));
-                assert!(zip(bb_res, bb_res2)
-                    .map(|(a, b)| (a - b).abs())
-                    .all(|x| x <= 1e-6));*/
                 let exploitability = match updating_player {
                     Small => bb_res2,
                     Big => sb_res2,
                 };
-                (sb_res2, bb_res2, exploitability)
+                [sb_res2, bb_res2, exploitability]
             }
             Flop => {
-                let mut total = ([0.0; 1326], [0.0; 1326], [0.0; 1326]);
+                let mut total = [Vector::default(); 3];
                 for next_state in self.next_states.iter_mut() {
                     let res = next_state.evaluate_state(
                         range_sb,
@@ -593,25 +617,17 @@ impl State {
                         card_order,
                         updating_player,
                         permuter,
+                        calc_exploit,
                     );
-                    assert!(!next_state.permutations.is_empty());
                     for &permutation in &next_state.permutations {
-                        let permuted_res = (
-                            permuter.permute(permutation, res.0),
-                            permuter.permute(permutation, res.1),
-                            permuter.permute(permutation, res.2),
-                        );
-                        for i in 0..total.0.len() {
-                            total.0[i] += permuted_res.0[i];
-                            total.1[i] += permuted_res.1[i];
-                            total.2[i] += permuted_res.2[i];
+                        let permuted_res = res.map(|v| permuter.permute(permutation, v));
+                        for i in 0..3 {
+                            total[i] += permuted_res[i];
                         }
                     }
                 }
-                for i in 0..total.0.len() {
-                    total.0[i] /= 22100.0; // 52 choose 3
-                    total.1[i] /= 22100.0;
-                    total.2[i] /= 22100.0;
+                for t in total.iter_mut() {
+                    *t *= 1.0 / 22100.0;
                 }
                 total
             }
