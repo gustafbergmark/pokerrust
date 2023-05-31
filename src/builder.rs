@@ -31,7 +31,7 @@ fn possible_actions(state: &State) -> Vec<Action> {
         Check => vec![Call, Raise],
         Call => {
             if state.cards == 0 {
-                vec![/*Deal*/]
+                vec![Deal]
             } else {
                 vec![]
             }

@@ -9,7 +9,7 @@ pub struct Evaluator {
 
 impl Evaluator {
     pub fn new() -> Self {
-        //let evaluator = poker::Evaluator::new();
+        let evaluator = poker::Evaluator::new();
         let deck = Card::generate_deck();
 
         let mut card_nums = HashMap::new();
@@ -18,12 +18,12 @@ impl Evaluator {
         }
 
         let mut hands = Vec::new();
-        for hand in deck.combinations(1) {
+        for hand in deck.combinations(5) {
             let mut num_hand = 0;
             for &card in &hand {
                 num_hand |= card_nums.get(&card).unwrap();
             }
-            hands.push((num_hand, num_hand));
+            hands.push((evaluator.evaluate(hand).unwrap(), num_hand));
         }
         hands.sort();
 
@@ -41,14 +41,25 @@ impl Evaluator {
         Evaluator { evals, card_nums }
     }
 
-    pub fn evaluate(&self, cards: u64) -> u16 {
-        *self.evals.get(&cards).expect("Non-existent hand")
+    pub fn evaluate(&self, cards: u64) -> Option<u16> {
+        self.evals.get(&cards).map(|elem| *elem)
     }
 
     pub fn cards_to_u64(&self, cards: &[Card]) -> u64 {
         let mut res = 0;
         for card in cards {
             res |= self.card_nums.get(card).expect("Non-existent card");
+        }
+        res
+    }
+
+    pub fn separate_cards(mut cards: u64) -> Vec<usize> {
+        let mut res = Vec::new();
+        while cards > 0 {
+            let i = cards.trailing_zeros();
+            let card = 1 << i;
+            res.push(i as usize);
+            cards -= card;
         }
         res
     }
