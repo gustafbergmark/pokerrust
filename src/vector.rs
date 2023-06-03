@@ -52,6 +52,18 @@ impl Mul for Vector {
     }
 }
 
+impl Mul<f32> for Vector {
+    type Output = Self;
+
+    fn mul(self, rhs: f32) -> Self::Output {
+        let mut values = [0.0; 1326];
+        for i in 0..1326 {
+            values[i] = &self.values[i] * rhs;
+        }
+        Vector { values }
+    }
+}
+
 impl MulAssign for Vector {
     fn mul_assign(&mut self, rhs: Self) {
         for i in 0..1326 {

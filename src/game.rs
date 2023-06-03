@@ -68,7 +68,17 @@ impl Game {
         //dbg!(&self.root.card_strategies);
         let sb_avg = exp_sb.values.iter().sum::<f32>() / 1326.0 / 1225.0; // 1225 = 50 choose 2, the number of hands each hand play against
         let bb_avg = exp_bb.values.iter().sum::<f32>() / 1326.0 / 1225.0;
-        dbg!(calc_exploit, sb_avg + bb_avg, start.elapsed().as_secs_f32());
+        if calc_exploit || true {
+            println!(
+                "Iteration {} done \n\
+                  Exploitability: {} mb/h \n\
+                  Time: {} \n",
+                iteration_weight as i32,
+                (sb_avg + bb_avg) * 1000.0,
+                start.elapsed().as_secs_f32(),
+            );
+        }
+
         [util_sb, util_bb]
     }
 }

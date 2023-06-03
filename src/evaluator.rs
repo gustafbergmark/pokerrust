@@ -4,9 +4,10 @@ use std::collections::HashMap;
 
 pub struct Evaluator {
     evals: HashMap<u64, u16>,
+    vectorized_eval: HashMap<u64, Vec<(u16, u16)>>,
     card_nums: HashMap<Card, u64>,
 }
-
+#[allow(unused)]
 impl Evaluator {
     pub fn new() -> Self {
         let evaluator = poker::Evaluator::new();
@@ -38,11 +39,42 @@ impl Evaluator {
             evals.insert(num, count);
         }
 
-        Evaluator { evals, card_nums }
+        let card_order: Vec<u64> = Card::generate_deck()
+            .combinations(2)
+            .map(|cards| card_nums.get(&cards[0]).unwrap() | card_nums.get(&cards[1]).unwrap())
+            .collect();
+
+        let deck = Card::generate_deck();
+        let mut vectorized_flop = Vec::new();
+        for flop in deck.combinations(3) {
+            let mut num_hand = 0;
+            for &card in &flop {
+                num_hand |= card_nums.get(&card).unwrap();
+            }
+
+            let sorted: Vec<(u16, u16)> = card_order
+                .clone()
+                .into_iter()
+                .enumerate()
+                .map(|(i, elem)| (*evals.get(&(elem | num_hand)).unwrap_or(&0), i as u16))
+                .sorted() // could be done quicker, saves max 1 sec
+                .collect();
+            vectorized_flop.push((num_hand, sorted));
+        }
+
+        Evaluator {
+            evals,
+            card_nums,
+            vectorized_eval: vectorized_flop.into_iter().collect(),
+        }
     }
 
     pub fn evaluate(&self, cards: u64) -> Option<u16> {
         self.evals.get(&cards).map(|elem| *elem)
+    }
+
+    pub fn vectorized_eval(&self, cards: u64) -> &Vec<(u16, u16)> {
+        self.vectorized_eval.get(&cards).unwrap()
     }
 
     pub fn cards_to_u64(&self, cards: &[Card]) -> u64 {

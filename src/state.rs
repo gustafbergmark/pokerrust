@@ -316,55 +316,6 @@ impl State {
                     .unwrap()
                     .get_strategy(iteration_weight, calc_exploit);
 
-                /*let updates: Vec<(Vector, Vector, Vector, Vector)> = self
-                    .next_states
-                    .par_iter_mut()
-                    .zip(strategy)
-                    .map(|(next, action_prob)| {
-                        let new_range = *range * action_prob;
-
-                        let [util_sb, util_bb, exploit] = match self.next_to_act {
-                            Small => next.evaluate_state(
-                                &new_range,
-                                other_range,
-                                evaluator,
-                                iteration_weight,
-                                card_order,
-                                updating_player,
-                                permuter,
-                            ),
-                            Big => next.evaluate_state(
-                                other_range,
-                                &new_range,
-                                evaluator,
-                                iteration_weight,
-                                card_order,
-                                updating_player,
-                                permuter,
-                            ),
-                        };
-                        let (util, other) = match self.next_to_act {
-                            Small => (util_sb, util_bb),
-                            Big => (util_bb, util_sb),
-                        };
-
-                        return (util, util * action_prob, other, exploit);
-                    })
-                    .collect();
-                for (a, (util, avg_update, other, exploit)) in updates.into_iter().enumerate() {
-                    payoffs[a].values[..].copy_from_slice(&util.values);
-                    avgstrat += avg_update;
-                    other_util += other;
-                    if self.next_to_act == updating_player {
-                        exploitability += exploit
-                    } else {
-                        for i in 0..1326 {
-                            exploitability.values[i] =
-                                exploitability.values[i].max(exploit.values[i]);
-                        }
-                    }
-                }*/
-
                 for (a, (next, action_prob)) in
                     zip(self.next_states.iter_mut(), strategy).enumerate()
                 {
@@ -400,7 +351,7 @@ impl State {
                     avgstrat += util * action_prob;
                     other_util += other;
                     if self.next_to_act == updating_player {
-                        exploitability += exploit
+                        exploitability += exploit // something needs to be done here...
                     } else {
                         for i in 0..1326 {
                             exploitability.values[i] =
@@ -427,20 +378,24 @@ impl State {
             }
 
             Showdown | BBWins | SBWins => {
-                let mut sb_res2 = Vector::default();
-                let mut bb_res2 = Vector::default();
+                let mut sb_res = Vector::default();
+                let mut bb_res = Vector::default();
 
                 match self.terminal {
                     Showdown => {
-                        let sorted: Vec<(u16, usize)> = card_order
-                            .clone()
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, elem)| {
-                                (evaluator.evaluate(elem | self.cards).unwrap_or(0), i)
-                            })
-                            .sorted() // could be done quicker, saves max 1 sec
-                            .collect();
+                        /*let sorted: Vec<(u16, u16)> = card_order
+                        .clone()
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, elem)| {
+                            (evaluator.evaluate(elem | self.cards).unwrap_or(0), i as u16)
+                        })
+                        .sorted() // could be done quicker, saves max 1 sec
+                        .collect();*/
+
+                        let sorted = evaluator.vectorized_eval(self.cards);
+                        //assert_eq!(new_version.clone(), sorted.clone());
+
                         let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
 
                         let mut collisions_sb = [0.0; 52];
@@ -457,18 +412,19 @@ impl State {
                             let mut current_collisions_bb = [0.0; 52];
                             // forward pass
                             for &(_, index) in group {
+                                let index = index as usize;
                                 let cards = card_order[index];
                                 if card_order[index] & self.cards > 0 {
                                     continue;
                                 }
                                 let card = Evaluator::separate_cards(cards);
-                                sb_res2[index] += cum_sb;
-                                bb_res2[index] += cum_bb;
+                                sb_res[index] += cum_sb;
+                                bb_res[index] += cum_bb;
                                 current_cum_sb += self.bbbet * range_bb[index];
                                 current_cum_bb += self.sbbet * range_sb[index];
                                 for c in card {
-                                    sb_res2[index] -= collisions_sb[c];
-                                    bb_res2[index] -= collisions_bb[c];
+                                    sb_res[index] -= collisions_sb[c];
+                                    bb_res[index] -= collisions_bb[c];
                                     current_collisions_sb[c] += self.bbbet * range_bb[index];
                                     current_collisions_bb[c] += self.sbbet * range_sb[index];
                                 }
@@ -497,18 +453,19 @@ impl State {
                             let mut current_collisions_bb = [0.0; 52];
                             // forward pass
                             for &(_, index) in group {
+                                let index = index as usize;
                                 let cards = card_order[index];
                                 if card_order[index] & self.cards > 0 {
                                     continue;
                                 }
                                 let card = Evaluator::separate_cards(cards);
-                                sb_res2[index] -= cum_sb;
-                                bb_res2[index] -= cum_bb;
+                                sb_res[index] -= cum_sb;
+                                bb_res[index] -= cum_bb;
                                 current_cum_sb += self.sbbet * range_bb[index];
                                 current_cum_bb += self.bbbet * range_sb[index];
                                 for c in card {
-                                    sb_res2[index] += collisions_sb[c];
-                                    bb_res2[index] += collisions_bb[c];
+                                    sb_res[index] += collisions_sb[c];
+                                    bb_res[index] += collisions_bb[c];
                                     current_collisions_sb[c] += self.sbbet * range_bb[index];
                                     current_collisions_bb[c] += self.bbbet * range_sb[index];
                                 }
@@ -542,19 +499,19 @@ impl State {
                             if card_order[index] & self.cards > 0 {
                                 continue;
                             }
-                            sb_res2[index] = bb_sum + range_bb[index]; // inclusion exclusion
-                            bb_res2[index] = sb_sum + range_sb[index];
+                            sb_res[index] = bb_sum + range_bb[index]; // inclusion exclusion
+                            bb_res[index] = sb_sum + range_sb[index];
                             let cards = Evaluator::separate_cards(card_order[index]);
                             for card in cards {
-                                sb_res2[index] -= collisions_sb[card];
-                                bb_res2[index] -= collisions_bb[card];
+                                sb_res[index] -= collisions_sb[card];
+                                bb_res[index] -= collisions_bb[card];
                             }
                         }
-                        sb_res2
+                        sb_res
                             .values
                             .iter_mut()
                             .for_each(|elem| *elem *= self.bbbet);
-                        bb_res2
+                        bb_res
                             .values
                             .iter_mut()
                             .for_each(|elem| *elem *= -self.bbbet);
@@ -580,19 +537,19 @@ impl State {
                             if card_order[index] & self.cards > 0 {
                                 continue;
                             }
-                            sb_res2[index] = bb_sum + range_bb[index]; // inclusion exclusion
-                            bb_res2[index] = sb_sum + range_sb[index];
+                            sb_res[index] = bb_sum + range_bb[index]; // inclusion exclusion
+                            bb_res[index] = sb_sum + range_sb[index];
                             let cards = Evaluator::separate_cards(card_order[index]);
                             for card in cards {
-                                sb_res2[index] -= collisions_sb[card];
-                                bb_res2[index] -= collisions_bb[card];
+                                sb_res[index] -= collisions_sb[card];
+                                bb_res[index] -= collisions_bb[card];
                             }
                         }
-                        sb_res2
+                        sb_res
                             .values
                             .iter_mut()
                             .for_each(|elem| *elem *= -self.sbbet);
-                        bb_res2
+                        bb_res
                             .values
                             .iter_mut()
                             .for_each(|elem| *elem *= self.sbbet);
@@ -601,10 +558,10 @@ impl State {
                 }
 
                 let exploitability = match updating_player {
-                    Small => bb_res2,
-                    Big => sb_res2,
+                    Small => bb_res,
+                    Big => sb_res,
                 };
-                [sb_res2, bb_res2, exploitability]
+                [sb_res, bb_res, exploitability]
             }
             Flop => {
                 let mut total = [Vector::default(); 3];
