@@ -289,8 +289,7 @@ impl State {
         card_order: &Vec<u64>,
         updating_player: Player,
         permuter: &PermutationHandler,
-        calc_exploit: bool,
-    ) -> [Vector; 3] {
+    ) -> [Vector; 2] {
         //(util of sb, util of bb, exploitability of updating player)
         match self.terminal {
             NonTerminal => {
@@ -300,7 +299,6 @@ impl State {
                 };
                 // get avg strategy and individual payoffs
                 let mut avgstrat = Vector::default();
-                let mut other_util = Vector::default();
                 let mut exploitability = if self.next_to_act == updating_player {
                     Vector::default()
                 } else {
@@ -310,18 +308,14 @@ impl State {
                 };
                 let mut payoffs = [Vector::default(); 2];
 
-                let strategy = self
-                    .card_strategies
-                    .as_mut()
-                    .unwrap()
-                    .get_strategy(iteration_weight, calc_exploit);
+                let strategy = self.card_strategies.as_mut().unwrap().get_strategy();
 
                 for (a, (next, action_prob)) in
                     zip(self.next_states.iter_mut(), strategy).enumerate()
                 {
                     let new_range = *range * action_prob;
 
-                    let [util_sb, util_bb, exploit] = match self.next_to_act {
+                    let [util, exploit] = match self.next_to_act {
                         Small => next.evaluate_state(
                             &new_range,
                             other_range,
@@ -330,7 +324,6 @@ impl State {
                             card_order,
                             updating_player,
                             permuter,
-                            calc_exploit,
                         ),
                         Big => next.evaluate_state(
                             other_range,
@@ -340,16 +333,14 @@ impl State {
                             card_order,
                             updating_player,
                             permuter,
-                            calc_exploit,
                         ),
                     };
-                    let (util, other) = match self.next_to_act {
-                        Small => (util_sb, util_bb),
-                        Big => (util_bb, util_sb),
-                    };
-                    payoffs[a].values[..].copy_from_slice(&util.values);
-                    avgstrat += util * action_prob;
-                    other_util += other;
+                    if updating_player == self.next_to_act {
+                        payoffs[a].values[..].copy_from_slice(&util.values);
+                        avgstrat += util * action_prob;
+                    } else {
+                        avgstrat += util;
+                    }
                     if self.next_to_act == updating_player {
                         exploitability += exploit // something needs to be done here...
                     } else {
@@ -365,15 +356,12 @@ impl State {
                     for (i, &util) in payoffs.iter().enumerate() {
                         update[i] = util - avgstrat;
                     }
-                    self.card_strategies
-                        .as_mut()
-                        .unwrap()
-                        .update_add(&update, calc_exploit);
+                    self.card_strategies.as_mut().unwrap().update_add(&update);
                 }
 
                 match self.next_to_act {
-                    Small => [avgstrat, other_util, exploitability],
-                    Big => [other_util, avgstrat, exploitability],
+                    Small => [avgstrat, exploitability],
+                    Big => [avgstrat, exploitability],
                 }
             }
 
@@ -557,14 +545,14 @@ impl State {
                     _ => todo!(),
                 }
 
-                let exploitability = match updating_player {
-                    Small => bb_res,
-                    Big => sb_res,
+                let (util, exploitability) = match updating_player {
+                    Small => (sb_res, bb_res),
+                    Big => (bb_res, sb_res),
                 };
-                [sb_res, bb_res, exploitability]
+                [util, exploitability]
             }
             Flop => {
-                let mut total = [Vector::default(); 3];
+                let mut total = [Vector::default(); 2];
                 for next_state in self.next_states.iter_mut() {
                     let res = next_state.evaluate_state(
                         range_sb,
@@ -574,11 +562,10 @@ impl State {
                         card_order,
                         updating_player,
                         permuter,
-                        calc_exploit,
                     );
                     for &permutation in &next_state.permutations {
                         let permuted_res = res.map(|v| permuter.permute(permutation, v));
-                        for i in 0..3 {
+                        for i in 0..2 {
                             total[i] += permuted_res[i];
                         }
                     }

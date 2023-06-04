@@ -42,9 +42,9 @@ impl Game {
         }
     }
 
-    pub fn perform_iter(&mut self, iteration_weight: f32, calc_exploit: bool) -> [Vector; 2] {
+    pub fn perform_iter(&mut self, iteration_weight: f32) {
         let start = Instant::now();
-        let [_, _, exp_sb] = self.root.evaluate_state(
+        let [_, exp_sb] = self.root.evaluate_state(
             &Vector::ones(),
             &Vector::ones(),
             &self.evaluator,
@@ -52,10 +52,9 @@ impl Game {
             &self.card_order,
             Small,
             &self.permuter,
-            calc_exploit,
         );
 
-        let [util_sb, util_bb, exp_bb] = self.root.evaluate_state(
+        let [_, exp_bb] = self.root.evaluate_state(
             &Vector::ones(),
             &Vector::ones(),
             &self.evaluator,
@@ -63,22 +62,18 @@ impl Game {
             &self.card_order,
             Big,
             &self.permuter,
-            calc_exploit,
         );
         //dbg!(&self.root.card_strategies);
         let sb_avg = exp_sb.values.iter().sum::<f32>() / 1326.0 / 1225.0; // 1225 = 50 choose 2, the number of hands each hand play against
         let bb_avg = exp_bb.values.iter().sum::<f32>() / 1326.0 / 1225.0;
-        if calc_exploit || true {
-            println!(
-                "Iteration {} done \n\
+
+        println!(
+            "Iteration {} done \n\
                   Exploitability: {} mb/h \n\
                   Time: {} \n",
-                iteration_weight as i32,
-                (sb_avg + bb_avg) * 1000.0,
-                start.elapsed().as_secs_f32(),
-            );
-        }
-
-        [util_sb, util_bb]
+            iteration_weight as i32,
+            (sb_avg + bb_avg) * 1000.0,
+            start.elapsed().as_secs_f32(),
+        );
     }
 }

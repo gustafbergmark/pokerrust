@@ -5,12 +5,11 @@ use std::fmt::{Debug, Formatter};
 #[derive(Clone)]
 pub(crate) struct Strategy {
     regrets: [Vector; 2],
-    strategy_sum: [Vector; 2],
 }
 
 impl Debug for Strategy {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.get_average_strategy())
+        write!(f, "{:?}", self.get_strategy())
     }
 }
 
@@ -18,39 +17,23 @@ impl Strategy {
     pub fn new() -> Self {
         Strategy {
             regrets: [Vector::default(); 2],
-            strategy_sum: [Vector::default(); 2],
         }
     }
 
-    pub fn update_add(&mut self, update: &[Vector; 2], calc_expoit: bool) {
-        if !calc_expoit {
-            for i in 0..2 {
-                self.regrets[i] += update[i];
-                self.regrets[i]
-                    .values
-                    .iter_mut()
-                    .for_each(|elem| *elem = elem.max(0.0));
-            }
+    pub fn update_add(&mut self, update: &[Vector; 2]) {
+        for i in 0..2 {
+            self.regrets[i] += update[i];
+            self.regrets[i]
+                .values
+                .iter_mut()
+                .for_each(|elem| *elem = elem.max(0.0));
         }
     }
 
-    pub fn get_strategy(&mut self, iteration_weight: f32, calc_exploit: bool) -> [Vector; 2] {
-        if !calc_exploit {
-            let regret_match: [Vector; 2] = self.regrets.clone();
-            let normalized = Self::normalize(&regret_match);
-            for i in 0..2 {
-                let discount = iteration_weight / (iteration_weight + 1.0);
-                self.strategy_sum[i] *= discount;
-                self.strategy_sum[i] += normalized[i];
-            }
-            normalized
-        } else {
-            self.get_average_strategy()
-        }
-    }
-
-    pub fn get_average_strategy(&self) -> [Vector; 2] {
-        Self::normalize(&self.strategy_sum)
+    pub fn get_strategy(&self) -> [Vector; 2] {
+        let regret_match: [Vector; 2] = self.regrets.clone();
+        let normalized = Self::normalize(&regret_match);
+        normalized
     }
 
     fn normalize(v: &[Vector; 2]) -> [Vector; 2] {
