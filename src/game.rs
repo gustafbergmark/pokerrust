@@ -3,7 +3,6 @@ use crate::evaluator::Evaluator;
 use crate::permutation_handler::PermutationHandler;
 use crate::state::State;
 use crate::vector::Vector;
-use itertools::Itertools;
 use poker::{card, Card};
 use std::fmt::{Debug, Formatter};
 use std::time::Instant;
@@ -22,58 +21,62 @@ impl Debug for Game {
 }
 
 impl Game {
-    pub fn new(root: State, evaluator: Evaluator) -> Self {
+    pub fn new(root: State, evaluator: Evaluator, card_order: Vec<[Card; 2]>) -> Self {
         let _kuhn_hands: Vec<u64> = vec![
             evaluator.cards_to_u64(&[card!(Jack, Hearts)]),
             evaluator.cards_to_u64(&[card!(Queen, Hearts)]),
             evaluator.cards_to_u64(&[card!(King, Hearts)]),
         ];
-        let _all_hands: Vec<u64> = Card::generate_deck()
-            .combinations(2)
-            .map(|cards| evaluator.cards_to_u64(&cards))
+
+        let card_order_nums = card_order
+            .iter()
+            .map(|hand| evaluator.cards_to_u64(hand))
             .collect();
-        let card_order = _all_hands;
-        //let card_order = all_hands;
+        let permuter = PermutationHandler::new(&card_order);
         Game {
             root,
-            card_order,
+            card_order: card_order_nums,
             evaluator,
-            permuter: PermutationHandler::new(),
+            permuter,
         }
     }
 
-    pub fn perform_iter(&mut self, iteration_weight: f32) {
+    pub fn perform_iter(&mut self, iter: usize) {
         let start = Instant::now();
-        let [_, exp_sb] = self.root.evaluate_state(
+
+        let utilsb = self.root.evaluate_state(
             &Vector::ones(),
             &Vector::ones(),
             &self.evaluator,
-            iteration_weight,
             &self.card_order,
             Small,
             &self.permuter,
         );
 
-        let [_, exp_bb] = self.root.evaluate_state(
+        let utilbb = self.root.evaluate_state(
             &Vector::ones(),
             &Vector::ones(),
             &self.evaluator,
-            iteration_weight,
             &self.card_order,
             Big,
             &self.permuter,
         );
-        //dbg!(&self.root.card_strategies);
-        let sb_avg = exp_sb.values.iter().sum::<f32>() / 1326.0 / 1225.0; // 1225 = 50 choose 2, the number of hands each hand play against
-        let bb_avg = exp_bb.values.iter().sum::<f32>() / 1326.0 / 1225.0;
-
-        println!(
-            "Iteration {} done \n\
+        if iter % 1 == 0 {
+            let [exp_sb, exp_bb] = self.root.calc_exploit(
+                &Vector::ones(),
+                &Vector::ones(),
+                &self.evaluator,
+                &self.card_order,
+                &self.permuter,
+            );
+            println!(
+                "Iteration {} done \n\
                   Exploitability: {} mb/h \n\
                   Time: {} \n",
-            iteration_weight as i32,
-            (sb_avg + bb_avg) * 1000.0,
-            start.elapsed().as_secs_f32(),
-        );
+                iter,
+                (exp_sb.sum() + exp_bb.sum()) * 1000.0 / 1326.0,
+                start.elapsed().as_secs_f32(),
+            );
+        }
     }
 }

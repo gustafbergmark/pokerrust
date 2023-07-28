@@ -9,9 +9,10 @@ pub struct Evaluator {
 }
 #[allow(unused)]
 impl Evaluator {
-    pub fn new() -> Self {
+    pub fn new(card_order: &Vec<[Card; 2]>) -> Self {
         let evaluator = poker::Evaluator::new();
         let deck = Card::generate_deck();
+        //dbg!(Card::generate_deck().collect::<Vec<_>>());
 
         let mut card_nums = HashMap::new();
         for (i, card) in Card::generate_deck().enumerate() {
@@ -39,8 +40,8 @@ impl Evaluator {
             evals.insert(num, count);
         }
 
-        let card_order: Vec<u64> = Card::generate_deck()
-            .combinations(2)
+        let card_order: Vec<u64> = card_order
+            .iter()
             .map(|cards| card_nums.get(&cards[0]).unwrap() | card_nums.get(&cards[1]).unwrap())
             .collect();
 
@@ -85,14 +86,13 @@ impl Evaluator {
         res
     }
 
-    pub fn separate_cards(mut cards: u64) -> Vec<usize> {
-        let mut res = Vec::new();
-        while cards > 0 {
-            let i = cards.trailing_zeros();
-            let card = 1 << i;
-            res.push(i as usize);
-            cards -= card;
-        }
+    pub fn separate_cards(mut cards: u64) -> [usize; 2] {
+        let mut res = [0, 0];
+        let i = cards.trailing_zeros();
+        let card = 1 << i;
+        res[0] = i as usize;
+        cards -= card;
+        res[1] = cards.trailing_zeros() as usize;
         res
     }
 }

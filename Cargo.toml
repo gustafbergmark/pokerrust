@@ -7,11 +7,13 @@ edition = "2021"
 opt-level = 3
 lto = true
 codegen-units = 1
+debug = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 poker = { git = "https://github.com/gustafbergmark/poker.git" }
-serde = "1.0.158"
+serde = { version = "1.0.158", features = ["derive"] }
 itertools = "0.10.5"
 rayon = "1.7.0"
+approx = "0.5.1"

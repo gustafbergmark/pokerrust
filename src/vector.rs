@@ -1,12 +1,13 @@
-use std::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
+#[repr(align(256))]
 #[derive(Clone, Copy, Debug)]
 pub struct Vector {
-    pub values: [f32; 1326],
+    pub values: [f64; 1326],
 }
 #[allow(unused)]
 impl Vector {
-    pub fn from(v: &[f32]) -> Self {
+    pub fn from(v: &[f64]) -> Self {
         Vector {
             values: v.try_into().unwrap(),
         }
@@ -14,6 +15,19 @@ impl Vector {
     pub fn ones() -> Self {
         Vector {
             values: [1.0; 1326],
+        }
+    }
+
+    pub fn sum(&self) -> f64 {
+        self.values.iter().sum::<f64>()
+    }
+
+    pub fn norm(&self) -> Self {
+        let n = self.sum();
+        if n == 0.0 {
+            return Vector::default();
+        } else {
+            *self / n
         }
     }
 }
@@ -27,7 +41,7 @@ impl Default for Vector {
 }
 
 impl Index<usize> for Vector {
-    type Output = f32;
+    type Output = f64;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.values[index]
@@ -46,19 +60,19 @@ impl Mul for Vector {
     fn mul(self, rhs: Self) -> Self::Output {
         let mut values = [0.0; 1326];
         for i in 0..1326 {
-            values[i] = &self.values[i] * &rhs.values[i];
+            values[i] = self.values[i] * rhs.values[i];
         }
         Vector { values }
     }
 }
 
-impl Mul<f32> for Vector {
+impl Mul<f64> for Vector {
     type Output = Self;
 
-    fn mul(self, rhs: f32) -> Self::Output {
+    fn mul(self, rhs: f64) -> Self::Output {
         let mut values = [0.0; 1326];
         for i in 0..1326 {
-            values[i] = &self.values[i] * rhs;
+            values[i] = self.values[i] * rhs;
         }
         Vector { values }
     }
@@ -67,13 +81,13 @@ impl Mul<f32> for Vector {
 impl MulAssign for Vector {
     fn mul_assign(&mut self, rhs: Self) {
         for i in 0..1326 {
-            self.values[i] *= &rhs.values[i];
+            self.values[i] *= rhs.values[i];
         }
     }
 }
 
-impl MulAssign<f32> for Vector {
-    fn mul_assign(&mut self, rhs: f32) {
+impl MulAssign<f64> for Vector {
+    fn mul_assign(&mut self, rhs: f64) {
         for i in 0..1326 {
             self.values[i] *= rhs;
         }
@@ -86,7 +100,7 @@ impl Add for Vector {
     fn add(self, rhs: Self) -> Self::Output {
         let mut values = [0.0; 1326];
         for i in 0..1326 {
-            values[i] = &self.values[i] + &rhs.values[i];
+            values[i] = self.values[i] + rhs.values[i];
         }
         Vector { values }
     }
@@ -95,7 +109,7 @@ impl Add for Vector {
 impl AddAssign for Vector {
     fn add_assign(&mut self, rhs: Self) {
         for i in 0..1326 {
-            self.values[i] += &rhs.values[i];
+            self.values[i] += rhs.values[i];
         }
     }
 }
@@ -106,7 +120,7 @@ impl Sub for Vector {
     fn sub(self, rhs: Self) -> Self::Output {
         let mut values = [0.0; 1326];
         for i in 0..1326 {
-            values[i] = &self.values[i] - &rhs.values[i];
+            values[i] = self.values[i] - rhs.values[i];
         }
         Vector { values }
     }
@@ -115,7 +129,43 @@ impl Sub for Vector {
 impl SubAssign for Vector {
     fn sub_assign(&mut self, rhs: Self) {
         for i in 0..1326 {
-            self.values[i] -= &rhs.values[i];
+            self.values[i] -= rhs.values[i];
         }
+    }
+}
+
+impl Div for Vector {
+    type Output = Self;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        let mut values = [0.0; 1326];
+        for i in 0..1326 {
+            values[i] = self.values[i] / rhs.values[i];
+        }
+        Vector { values }
+    }
+}
+
+impl DivAssign for Vector {
+    fn div_assign(&mut self, rhs: Self) {
+        for i in 0..1326 {
+            self.values[i] /= rhs.values[i];
+        }
+        for i in 0..1326 {
+            if self.values[i].is_nan() {
+                self.values[i] = 0.5;
+            }
+        }
+    }
+}
+impl Div<f64> for Vector {
+    type Output = Self;
+
+    fn div(self, rhs: f64) -> Self::Output {
+        let mut values = [0.0; 1326];
+        for i in 0..1326 {
+            values[i] = self.values[i] / rhs;
+        }
+        Vector { values }
     }
 }

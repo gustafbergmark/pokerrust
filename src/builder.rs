@@ -5,13 +5,20 @@ use crate::enums::TerminalState::*;
 use crate::evaluator::Evaluator;
 use crate::game::Game;
 use crate::state::State;
+use itertools::Itertools;
+use poker::Card;
 
 pub(crate) fn flop_poker() -> Game {
+    let mut card_order: Vec<[Card; 2]> = Card::generate_deck()
+        .combinations(2)
+        .map(|e| e.try_into().unwrap())
+        .collect();
+    card_order.sort();
     let mut root = State::new(NonTerminal, Deal, 1.0, 1.0, Small);
-    let evaluator = Evaluator::new();
+    let evaluator = Evaluator::new(&card_order);
     let states = build(&mut root, &evaluator);
     dbg!(states);
-    Game::new(root, evaluator)
+    Game::new(root, evaluator, card_order)
 }
 
 fn build(state: &mut State, evaluator: &Evaluator) -> usize {

@@ -31,13 +31,16 @@ impl Strategy {
     }
 
     pub fn get_strategy(&self) -> [Vector; 2] {
-        let regret_match: [Vector; 2] = self.regrets.clone();
-        let normalized = Self::normalize(&regret_match);
-        normalized
+        let mut regret_match: [Vector; 2] = self.regrets;
+        Self::normalize(&mut regret_match);
+        regret_match
     }
 
-    fn normalize(v: &[Vector; 2]) -> [Vector; 2] {
-        let mut res = v.clone();
+    fn normalize(v: &mut [Vector; 2]) {
+        let norm = v[0] + v[1];
+        v[0] /= norm;
+        v[1] /= norm;
+        /*let mut res = v.clone();
         for i in 0..1326 {
             let mut norm = 0.0;
             for j in 0..2 {
@@ -51,6 +54,6 @@ impl Strategy {
                 }
             }
         }
-        res
+        res*/
     }
 }
