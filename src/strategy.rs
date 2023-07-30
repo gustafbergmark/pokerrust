@@ -40,20 +40,5 @@ impl Strategy {
         let norm = v[0] + v[1];
         v[0] /= norm;
         v[1] /= norm;
-        /*let mut res = v.clone();
-        for i in 0..1326 {
-            let mut norm = 0.0;
-            for j in 0..2 {
-                norm += v[j][i];
-            }
-            for j in 0..2 {
-                if norm != 0.0 {
-                    res[j][i] /= norm;
-                } else {
-                    res[j][i] = 0.5;
-                }
-            }
-        }
-        res*/
     }
 }

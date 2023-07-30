@@ -5,7 +5,7 @@ use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, 
 pub struct Vector {
     pub values: [f64; 1326],
 }
-#[allow(unused)]
+
 impl Vector {
     pub fn from(v: &[f64]) -> Self {
         Vector {
@@ -20,15 +20,6 @@ impl Vector {
 
     pub fn sum(&self) -> f64 {
         self.values.iter().sum::<f64>()
-    }
-
-    pub fn norm(&self) -> Self {
-        let n = self.sum();
-        if n == 0.0 {
-            return Vector::default();
-        } else {
-            *self / n
-        }
     }
 }
 
