@@ -14,6 +14,8 @@ debug = true
 [dependencies]
 poker = { git = "https://github.com/gustafbergmark/poker.git" }
 serde = { version = "1.0.158", features = ["derive"] }
+serde_json = "1.0.104"
+serde_json_any_key = "2.0.0"
 itertools = "0.10.5"
 rayon = "1.7.0"
 approx = "0.5.1"
