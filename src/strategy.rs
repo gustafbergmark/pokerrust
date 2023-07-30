@@ -2,7 +2,7 @@ use crate::vector::Vector;
 use std::fmt::{Debug, Formatter};
 
 // holds historic winnings of each move and hand
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(crate) struct Strategy {
     regrets: [Vector; 2],
 }

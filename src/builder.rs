@@ -16,8 +16,8 @@ pub(crate) fn flop_poker() -> Game {
     card_order.sort();
     let mut root = State::new(NonTerminal, Deal, 1.0, 1.0, Small);
     let evaluator = Evaluator::new(&card_order);
-    let states = build(&mut root, &evaluator);
-    dbg!(states);
+    let _states = build(&mut root, &evaluator);
+    //dbg!(_states);
     Game::new(root, evaluator, card_order)
 }
 

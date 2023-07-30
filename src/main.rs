@@ -12,9 +12,8 @@ mod vector;
 
 fn main() {
     let start = Instant::now();
-    //let eval = evaluator::Evaluator::new();
     let mut game = builder::flop_poker();
-    dbg!("Game created", start.elapsed().as_millis());
+    println!("Game created in {} seconds", start.elapsed().as_secs_f32());
     let start = Instant::now();
     for i in 1..=1_000_000 {
         game.perform_iter(i);

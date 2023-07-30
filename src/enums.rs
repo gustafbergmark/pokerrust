@@ -4,7 +4,7 @@ pub(crate) enum Player {
     Big,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Action {
     Fold,
     Check,
