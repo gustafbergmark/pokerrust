@@ -3,7 +3,7 @@ use itertools::Itertools;
 use poker::Suit::*;
 use poker::{Card, Suit};
 use std::collections::HashMap;
-//use std::iter::zip;
+use std::iter::zip;
 use std::ops::Range;
 
 pub struct PermutationHandler {
@@ -65,11 +65,11 @@ impl PermutationHandler {
     }
 
     pub fn permute(&self, permutation: [Suit; 4], v: Vector) -> Vector {
-        /*let p = *self.map.get(&permutation).unwrap();
-        let mut result = [0.0; 1326];
+        let p = *self.map.get(&permutation).unwrap();
+        let mut result2 = [0.0; 1326];
         for (i, value) in zip(p, v.values) {
-            result[i] = value;
-        }*/
+            result2[i] = value;
+        }
 
         let mut result = [0.0; 1326];
         let values = v.values;
@@ -105,10 +105,10 @@ impl PermutationHandler {
                 Self::transpose(&mut result[r2])
             }
         }
-        /*assert_eq!(
+        assert_eq!(
             &result2.iter().enumerate().collect::<Vec<_>>(),
             &result.iter().enumerate().collect::<Vec<_>>()
-        );*/
+        );
         Vector { values: result }
     }
 

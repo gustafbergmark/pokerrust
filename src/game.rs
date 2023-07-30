@@ -44,7 +44,7 @@ impl Game {
     pub fn perform_iter(&mut self, iter: usize) {
         let start = Instant::now();
 
-        let utilsb = self.root.evaluate_state(
+        let _ = self.root.evaluate_state(
             &Vector::ones(),
             &Vector::ones(),
             &self.evaluator,
@@ -53,7 +53,7 @@ impl Game {
             &self.permuter,
         );
 
-        let utilbb = self.root.evaluate_state(
+        let _ = self.root.evaluate_state(
             &Vector::ones(),
             &Vector::ones(),
             &self.evaluator,
@@ -61,7 +61,8 @@ impl Game {
             Big,
             &self.permuter,
         );
-        if iter % 1 == 0 {
+        let iter_time = start.elapsed().as_secs_f32();
+        if iter % 100 == 0 {
             let [exp_sb, exp_bb] = self.root.calc_exploit(
                 &Vector::ones(),
                 &Vector::ones(),
@@ -72,10 +73,12 @@ impl Game {
             println!(
                 "Iteration {} done \n\
                   Exploitability: {} mb/h \n\
-                  Time: {} \n",
+                  Iter time: {} \n\
+                  Exploit calc time: {} \n",
                 iter,
-                (exp_sb.sum() + exp_bb.sum()) * 1000.0 / 1326.0,
-                start.elapsed().as_secs_f32(),
+                (exp_sb.sum() + exp_bb.sum()) * 1000.0 / 1326.0 / 1255.0,
+                iter_time,
+                start.elapsed().as_secs_f32() - iter_time,
             );
         }
     }

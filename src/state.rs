@@ -6,12 +6,10 @@ use crate::evaluator::Evaluator;
 use crate::permutation_handler::PermutationHandler;
 use crate::strategy::Strategy;
 use crate::vector::Vector;
+use approx::assert_relative_eq;
 use itertools::Itertools;
 use poker::Suit::{Clubs, Diamonds, Hearts, Spades};
 use poker::{Card, Suit};
-//use rayon::iter::IndexedParallelIterator;
-//use rayon::iter::IntoParallelRefMutIterator;
-//use rayon::iter::ParallelIterator;
 use std::collections::HashSet;
 use std::iter::zip;
 
@@ -59,7 +57,7 @@ impl State {
                 Fold => vec![State {
                     terminal: BBWins,
                     action,
-                    cards: self.cards.clone(),
+                    cards: self.cards,
                     sbbet: self.sbbet,
                     bbbet: self.bbbet,
                     next_to_act: Big,
@@ -70,7 +68,7 @@ impl State {
                 Check => vec![State {
                     terminal: NonTerminal,
                     action,
-                    cards: self.cards.clone(),
+                    cards: self.cards,
                     sbbet: self.sbbet,
                     bbbet: self.bbbet,
                     next_to_act: Big,
@@ -83,7 +81,7 @@ impl State {
                         vec![State {
                             terminal: Flop,
                             action,
-                            cards: self.cards.clone(),
+                            cards: self.cards,
                             sbbet: self.bbbet,
                             bbbet: self.bbbet,
                             next_to_act: Big,
@@ -95,7 +93,7 @@ impl State {
                         vec![State {
                             terminal: Showdown,
                             action,
-                            cards: self.cards.clone(),
+                            cards: self.cards,
                             sbbet: self.bbbet,
                             bbbet: self.bbbet,
                             next_to_act: Big,
@@ -109,8 +107,8 @@ impl State {
                 Raise => vec![State {
                     terminal: NonTerminal,
                     action,
-                    cards: self.cards.clone(),
-                    sbbet: self.bbbet + 1.0,
+                    cards: self.cards,
+                    sbbet: self.sbbet + 1.0,
                     bbbet: self.bbbet,
                     next_to_act: Big,
                     card_strategies: Some(Strategy::new()),
@@ -128,17 +126,17 @@ impl State {
                             continue;
                         }
                         let mut possible_permutations: Vec<[Suit; 4]> = vec![];
-                        let permutations = [Spades, Hearts, Diamonds, Clubs]
+                        let permutations = [Clubs, Hearts, Spades, Diamonds]
                             .into_iter()
                             .permutations(4);
                         for permutation in permutations {
                             let mut perm_flop = flop.clone();
                             for card in perm_flop.iter_mut() {
                                 let new_suit = match card.suit() {
-                                    Spades => permutation[0],
+                                    Clubs => permutation[0],
                                     Hearts => permutation[1],
-                                    Diamonds => permutation[2],
-                                    Clubs => permutation[3],
+                                    Spades => permutation[2],
+                                    Diamonds => permutation[3],
                                 };
                                 *card = Card::new(card.rank(), new_suit);
                             }
@@ -171,7 +169,7 @@ impl State {
                 Fold => vec![State {
                     terminal: SBWins,
                     action,
-                    cards: self.cards.clone(),
+                    cards: self.cards,
                     sbbet: self.sbbet,
                     bbbet: self.bbbet,
                     next_to_act: Small,
@@ -182,7 +180,7 @@ impl State {
                 Check => vec![State {
                     terminal: NonTerminal,
                     action,
-                    cards: self.cards.clone(),
+                    cards: self.cards,
                     sbbet: self.sbbet,
                     bbbet: self.bbbet,
                     next_to_act: Small,
@@ -195,7 +193,7 @@ impl State {
                         vec![State {
                             terminal: Flop,
                             action,
-                            cards: self.cards.clone(),
+                            cards: self.cards,
                             sbbet: self.sbbet,
                             bbbet: self.sbbet,
                             next_to_act: Small,
@@ -207,7 +205,7 @@ impl State {
                         vec![State {
                             terminal: Showdown,
                             action,
-                            cards: self.cards.clone(),
+                            cards: self.cards,
                             sbbet: self.sbbet,
                             bbbet: self.sbbet,
                             next_to_act: Small,
@@ -223,7 +221,7 @@ impl State {
                     action,
                     cards: self.cards.clone(),
                     sbbet: self.sbbet,
-                    bbbet: self.sbbet + 1.0,
+                    bbbet: self.bbbet + 1.0,
                     next_to_act: Small,
                     card_strategies: Some(Strategy::new()),
                     next_states: vec![],
@@ -673,55 +671,74 @@ impl State {
         card_order: &Vec<u64>,
         permuter: &PermutationHandler,
     ) -> [Vector; 2] {
-        //(util of sb, util of bb, exploitability of updating player)
         match self.terminal {
             NonTerminal => {
-                let (range, other_range) = match self.next_to_act {
-                    Small => (range_sb, range_bb),
-                    Big => (range_bb, range_sb),
-                };
                 // get avg strategy and individual payoffs
+                let (mut sb_avg, mut bb_avg) = match self.next_to_act {
+                    Small => (
+                        Vector {
+                            values: [f64::NEG_INFINITY; 1326],
+                        },
+                        Vector::default(),
+                    ),
+                    Big => (
+                        Vector::default(),
+                        Vector {
+                            values: [f64::NEG_INFINITY; 1326],
+                        },
+                    ),
+                };
+
                 let strategy = self.card_strategies.as_ref().unwrap().get_strategy();
 
-                for (a, (next, action_prob)) in
-                    zip(self.next_states.iter_mut(), strategy).enumerate()
-                {
-                    let new_range = *range * action_prob;
-
-                    let util = match self.next_to_act {
+                for (next, action_prob) in zip(self.next_states.iter_mut(), strategy) {
+                    let [sb_res, bb_res] = match self.next_to_act {
                         Small => next.calc_exploit(
-                            &new_range,
-                            other_range,
+                            &(*range_sb * action_prob),
+                            range_bb,
                             evaluator,
                             card_order,
                             permuter,
                         ),
                         Big => next.calc_exploit(
-                            other_range,
-                            &new_range,
+                            range_sb,
+                            &(*range_bb * action_prob),
                             evaluator,
                             card_order,
                             permuter,
                         ),
                     };
+                    match self.next_to_act {
+                        Small => {
+                            for i in 0..1326 {
+                                sb_avg[i] = sb_avg[i].max(sb_res[i]);
+                            }
+                            bb_avg += bb_res;
+                        }
+                        Big => {
+                            sb_avg += sb_res;
+                            for i in 0..1326 {
+                                bb_avg[i] = bb_avg[i].max(bb_res[i]);
+                            }
+                        }
+                    }
                 }
-                [Vector::default(); 2]
+                /*assert_relative_eq!(
+                    (sb_avg * *range_sb).sum(),
+                    -(bb_avg * *range_bb).sum(),
+                    epsilon = 1e-6
+                );*/
+                [sb_avg, bb_avg]
             }
 
             Showdown | BBWins | SBWins => {
                 let mut sb_res = Vector::default();
                 let mut bb_res = Vector::default();
-
-                let mut norm_sb = Vector::default();
-                let mut norm_bb = Vector::default();
-
                 match self.terminal {
                     Showdown => {
-                        assert_eq!(self.sbbet, self.bbbet);
-                        let bet = self.sbbet;
-
                         let sorted = evaluator.vectorized_eval(self.cards);
-                        //Small Blind
+                        //assert_eq!(new_version.clone(), sorted.clone());
+
                         let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
 
                         let mut collisions_sb = [0.0; 52];
@@ -737,8 +754,6 @@ impl State {
                                 let index = index as usize;
                                 let cards = card_order[index];
                                 if card_order[index] & self.cards > 0 {
-                                    assert_eq!(range_sb[index], 0.0);
-                                    assert_eq!(range_bb[index], 0.0);
                                     continue;
                                 }
                                 let card = Evaluator::separate_cards(cards);
@@ -749,9 +764,9 @@ impl State {
                                     current_collisions_sb[c] += range_bb[index];
                                 }
                             }
-                            cum_sb += current_cum_sb;
+                            cum_sb += current_cum_sb * self.bbbet;
                             for i in 0..52 {
-                                collisions_sb[i] += current_collisions_sb[i];
+                                collisions_sb[i] += current_collisions_sb[i] * self.bbbet;
                             }
                         }
 
@@ -780,31 +795,13 @@ impl State {
                                     current_collisions_sb[c] += range_bb[index];
                                 }
                             }
-                            cum_sb += current_cum_sb;
+                            cum_sb += current_cum_sb * self.sbbet;
                             for i in 0..52 {
-                                collisions_sb[i] += current_collisions_sb[i];
+                                collisions_sb[i] += current_collisions_sb[i] * self.sbbet;
                             }
                         }
-                        sb_res *= bet;
-                        let range_bb_sum = range_bb.sum();
-                        assert!((range_bb_sum - cum_sb).abs() < 1e-6);
-                        for i in 0..1326 {
-                            if card_order[i] & self.cards > 0 {
-                                continue;
-                            }
-                            let cards = Evaluator::separate_cards(card_order[i]);
-                            let norm =
-                                range_bb_sum - collisions_sb[cards[0]] - collisions_sb[cards[1]]
-                                    + range_bb[i];
-                            if norm < 1e-8 {
-                                norm_sb[i] = 0.0;
-                            } else {
-                                norm_sb[i] = sb_res[i] / norm;
-                            }
-                        }
-
-                        // Big Blind
                         let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
+
                         let mut collisions_bb = [0.0; 52];
 
                         let mut cum_bb = 0.0;
@@ -828,9 +825,9 @@ impl State {
                                     current_collisions_bb[c] += range_sb[index];
                                 }
                             }
-                            cum_bb += current_cum_bb;
+                            cum_bb += current_cum_bb * self.sbbet;
                             for i in 0..52 {
-                                collisions_bb[i] += current_collisions_bb[i];
+                                collisions_bb[i] += current_collisions_bb[i] * self.sbbet;
                             }
                         }
 
@@ -859,98 +856,10 @@ impl State {
                                     current_collisions_bb[c] += range_sb[index];
                                 }
                             }
-                            cum_bb += current_cum_bb;
+                            cum_bb += current_cum_bb * self.bbbet;
                             for i in 0..52 {
-                                collisions_bb[i] += current_collisions_bb[i];
+                                collisions_bb[i] += current_collisions_bb[i] * self.bbbet;
                             }
-                        }
-                        bb_res *= bet;
-                        let range_sb_sum = range_sb.sum();
-                        assert!((range_sb_sum - cum_bb).abs() < 1e-6);
-
-                        for i in 0..1326 {
-                            if card_order[i] & self.cards > 0 {
-                                continue;
-                            }
-                            let cards = Evaluator::separate_cards(card_order[i]);
-                            let norm =
-                                range_sb_sum - collisions_bb[cards[0]] - collisions_bb[cards[1]]
-                                    + range_sb[i];
-                            if norm < 1e-8 {
-                                norm_bb[i] = 0.0;
-                            } else {
-                                norm_bb[i] = bb_res[i] / norm;
-                            }
-                        }
-
-                        //assert!((bb_res2.sum() - bb_res.sum()).abs() < 1e-6);
-                        //dbg!("correct");
-
-                        let res1 = (norm_sb * range_sb.norm()).sum();
-                        let res2 = (norm_bb * range_bb.norm()).sum();
-                        if (res1 + res2).abs() > 1e-8 {
-                            dbg!((res1 + res2).abs(), res1, res2);
-                            let mut sb_res2 = Vector::default();
-                            for (i1, &hand1) in card_order.iter().enumerate() {
-                                let mut norm = 0.0;
-                                for (i2, &hand2) in card_order.iter().enumerate() {
-                                    if hand1 & hand2 > 0 {
-                                        continue;
-                                    }
-                                    if hand1 & self.cards > 0 || hand2 & self.cards > 0 {
-                                        continue;
-                                    }
-                                    norm += range_bb[i2];
-                                    if evaluator.evaluate(hand1 | self.cards).unwrap()
-                                        > evaluator.evaluate(hand2 | self.cards).unwrap()
-                                    {
-                                        sb_res2[i1] += bet * range_bb[i2];
-                                    } else if evaluator.evaluate(hand1 | self.cards).unwrap()
-                                        < evaluator.evaluate(hand2 | self.cards).unwrap()
-                                    {
-                                        sb_res2[i1] -= bet * range_bb[i2];
-                                    };
-                                }
-                                if norm == 0.0 {
-                                    sb_res2[i1] = 0.0;
-                                } else {
-                                    sb_res2[i1] /= norm;
-                                }
-                            }
-                            let mut bb_res2 = Vector::default();
-                            for (i1, &hand1) in card_order.iter().enumerate() {
-                                let mut norm = 0.0;
-                                for (i2, &hand2) in card_order.iter().enumerate() {
-                                    if hand1 & hand2 > 0 {
-                                        continue;
-                                    }
-                                    if hand1 & self.cards > 0 || hand2 & self.cards > 0 {
-                                        continue;
-                                    }
-                                    norm += range_sb[i2];
-                                    if evaluator.evaluate(hand1 | self.cards).unwrap()
-                                        > evaluator.evaluate(hand2 | self.cards).unwrap()
-                                    {
-                                        bb_res2[i1] += bet * range_sb[i2];
-                                    } else if evaluator.evaluate(hand1 | self.cards).unwrap()
-                                        < evaluator.evaluate(hand2 | self.cards).unwrap()
-                                    {
-                                        bb_res2[i1] -= bet * range_sb[i2];
-                                    };
-                                }
-                                if norm == 0.0 {
-                                    bb_res2[i1] = 0.0;
-                                } else {
-                                    bb_res2[i1] /= norm;
-                                }
-                            }
-
-                            let res1 = (sb_res2 * range_sb.norm()).sum();
-                            let res2 = (bb_res2 * range_bb.norm()).sum();
-                            if (res1 + res2).abs() > 1e-8 {
-                                dbg!("slow", (res1 + res2).abs(), res1, res2);
-                            }
-                            todo!()
                         }
                     }
                     SBWins => {
@@ -977,6 +886,7 @@ impl State {
                             }
                         }
                         sb_res *= self.bbbet;
+
                         let mut sb_sum = 0.0;
                         let mut collisions_bb = [0.0; 52];
                         for (index, &cards) in card_order.iter().enumerate() {
@@ -1052,31 +962,35 @@ impl State {
                     }
                     _ => todo!(),
                 }
-                [norm_sb, norm_bb]
+                /*assert_relative_eq!(
+                    (sb_res * *range_sb).sum(),
+                    -(bb_res * *range_bb).sum(),
+                    epsilon = 1e-6
+                );*/
+                [sb_res, bb_res]
             }
             Flop => {
                 let mut total = [Vector::default(); 2];
                 let range_sb_new = *range_sb * (1.0 / 22100.0);
                 let range_bb_new = *range_bb * (1.0 / 22100.0);
                 for next_state in self.next_states.iter_mut() {
-                    let mut possible = Vector::ones();
-                    for i in 0..1326 {
-                        if next_state.cards & card_order[i] > 0 {
-                            possible[i] = 0.0;
-                        }
-                    }
-                    let res = next_state.calc_exploit(
-                        &(range_sb_new * possible),
-                        &(range_bb_new * possible),
+                    let [sb_res, bb_res] = next_state.calc_exploit(
+                        &range_sb_new,
+                        &range_bb_new,
                         evaluator,
                         card_order,
                         permuter,
                     );
                     for &permutation in &next_state.permutations {
-                        total[0] += permuter.permute(permutation, res[0]);
-                        total[1] += permuter.permute(permutation, res[1]);
+                        total[0] += permuter.permute(permutation, sb_res);
+                        total[1] += permuter.permute(permutation, bb_res);
                     }
                 }
+                /*assert_relative_eq!(
+                    (total[0] * *range_sb).sum(),
+                    -(total[1] * *range_bb).sum(),
+                    epsilon = 1e-6
+                );*/
                 total
             }
         }
