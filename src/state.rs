@@ -17,8 +17,8 @@ pub(crate) struct State {
     terminal: TerminalState,
     pub action: Action,
     pub cards: u64,
-    sbbet: f64,
-    bbbet: f64,
+    sbbet: f32,
+    bbbet: f32,
     next_to_act: Player,
     pub card_strategies: Option<Strategy>,
     next_states: Vec<State>,
@@ -29,8 +29,8 @@ impl State {
     pub fn new(
         terminal: TerminalState,
         action: Action,
-        sbbet: f64,
-        bbbet: f64,
+        sbbet: f32,
+        bbbet: f32,
         next_to_act: Player,
     ) -> Self {
         State {
@@ -195,7 +195,7 @@ impl State {
             NonTerminal => {
                 // Observe: This vector is also used when calculating the exploitability
                 let mut average_strategy = if updating_player == self.next_to_act && calc_exploit {
-                    Vector::from(&[f64::NEG_INFINITY; 1326])
+                    Vector::from(&[f32::NEG_INFINITY; 1326])
                 } else {
                     Vector::default()
                 };

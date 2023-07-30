@@ -56,7 +56,7 @@ impl Game {
             false,
         );
         let iter_time = start.elapsed().as_secs_f32();
-        if iter % 1 == 0 {
+        if iter % 100 == 0 {
             let exp_sb = self.root.evaluate_state(
                 &Vector::ones(),
                 &self.evaluator,

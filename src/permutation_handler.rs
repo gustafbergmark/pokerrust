@@ -57,7 +57,7 @@ fn get_color_position(suits: [Suit; 2]) -> (Range<usize>, bool) {
     }
 }
 
-fn transpose(v: &mut [f64]) {
+fn transpose(v: &mut [f32]) {
     let mut res = [0.0; 169];
     for (i, chunk) in v.chunks_exact(13).enumerate() {
         for (j, val) in chunk.iter().enumerate() {
