@@ -184,642 +184,208 @@ impl State {
 
     pub fn evaluate_state(
         &mut self,
-        range_sb: &Vector,
-        range_bb: &Vector,
+        opponent_range: &Vector,
         evaluator: &Evaluator,
         card_order: &Vec<u64>,
         updating_player: Player,
+        calc_exploit: bool,
     ) -> Vector {
         //(util of sb, util of bb, exploitability of updating player)
         match self.terminal {
             NonTerminal => {
-                let (range, other_range) = match self.next_to_act {
-                    Small => (range_sb, range_bb),
-                    Big => (range_bb, range_sb),
+                // Observe: This vector is also used when calculating the exploitability
+                let mut average_strategy = if updating_player == self.next_to_act && calc_exploit {
+                    Vector::from(&[f64::NEG_INFINITY; 1326])
+                } else {
+                    Vector::default()
                 };
-                // get avg strategy and individual payoffs
-                let mut avgstrat = Vector::default();
-                let mut payoffs = [Vector::default(); 2];
+                let mut results = [Vector::default(); 2];
 
                 let strategy = self.card_strategies.as_ref().unwrap().get_strategy();
 
                 for (a, (next, action_prob)) in
                     zip(self.next_states.iter_mut(), strategy).enumerate()
                 {
-                    let new_range = *range * action_prob;
-
-                    let util = match self.next_to_act {
-                        Small => next.evaluate_state(
-                            &new_range,
-                            other_range,
+                    let utility = if self.next_to_act == updating_player {
+                        next.evaluate_state(
+                            opponent_range,
                             evaluator,
                             card_order,
                             updating_player,
-                        ),
-                        Big => next.evaluate_state(
-                            other_range,
-                            &new_range,
-                            evaluator,
-                            card_order,
-                            updating_player,
-                        ),
-                    };
-                    if updating_player == self.next_to_act {
-                        //payoffs[a].values[..].copy_from_slice(&util.values);
-                        payoffs[a] = util;
-                        avgstrat += util * action_prob;
+                            calc_exploit,
+                        )
                     } else {
-                        avgstrat += util;
+                        next.evaluate_state(
+                            &(*opponent_range * action_prob),
+                            evaluator,
+                            card_order,
+                            updating_player,
+                            calc_exploit,
+                        )
+                    };
+
+                    if updating_player == self.next_to_act {
+                        if !calc_exploit {
+                            results[a] = utility;
+                            average_strategy += utility * action_prob;
+                        } else {
+                            for i in 0..1326 {
+                                average_strategy[i] = average_strategy[i].max(utility[i]);
+                            }
+                        }
+                    } else {
+                        average_strategy += utility;
                     }
                 }
                 // update strategy
-                if self.next_to_act == updating_player {
+                if self.next_to_act == updating_player && !calc_exploit {
                     let mut update = [Vector::default(); 2];
-                    for (i, &util) in payoffs.iter().enumerate() {
-                        update[i] = util - avgstrat;
+                    for (i, &util) in results.iter().enumerate() {
+                        update[i] = util - average_strategy;
                     }
                     self.card_strategies.as_mut().unwrap().update_add(&update);
                 }
 
-                avgstrat
+                average_strategy
             }
 
-            Showdown | BBWins | SBWins => {
-                let mut sb_res = Vector::default();
-                let mut bb_res = Vector::default();
-
-                match self.terminal {
-                    Showdown => {
-                        let sorted = evaluator.vectorized_eval(self.cards);
-
-                        if updating_player == Small {
-                            let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
-
-                            let mut collisions_sb = [0.0; 52];
-
-                            let mut cum_sb = 0.0;
-
-                            for group in groups {
-                                let mut current_cum_sb = 0.0;
-
-                                let mut current_collisions_sb = [0.0; 52];
-                                // forward pass
-                                for &(_, index) in group {
-                                    let index = index as usize;
-                                    let cards = card_order[index];
-                                    if card_order[index] & self.cards > 0 {
-                                        continue;
-                                    }
-                                    let card = Evaluator::separate_cards(cards);
-                                    sb_res[index] += cum_sb;
-                                    current_cum_sb += range_bb[index];
-                                    for c in card {
-                                        sb_res[index] -= collisions_sb[c];
-                                        current_collisions_sb[c] += range_bb[index];
-                                    }
-                                }
-                                cum_sb += current_cum_sb * self.bbbet;
-                                for i in 0..52 {
-                                    collisions_sb[i] += current_collisions_sb[i] * self.bbbet;
-                                }
-                            }
-
-                            let mut collisions_sb = [0.0; 52];
-
-                            let mut cum_sb = 0.0;
-
-                            let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
-
-                            for group in groups.rev() {
-                                let mut current_cum_sb = 0.0;
-
-                                let mut current_collisions_sb = [0.0; 52];
-                                // forward pass
-                                for &(_, index) in group {
-                                    let index = index as usize;
-                                    let cards = card_order[index];
-                                    if card_order[index] & self.cards > 0 {
-                                        continue;
-                                    }
-                                    let card = Evaluator::separate_cards(cards);
-                                    sb_res[index] -= cum_sb;
-                                    current_cum_sb += range_bb[index];
-                                    for c in card {
-                                        sb_res[index] += collisions_sb[c];
-                                        current_collisions_sb[c] += range_bb[index];
-                                    }
-                                }
-                                cum_sb += current_cum_sb * self.sbbet;
-                                for i in 0..52 {
-                                    collisions_sb[i] += current_collisions_sb[i] * self.sbbet;
-                                }
-                            }
-                        }
-                        if updating_player == Big {
-                            let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
-
-                            let mut collisions_bb = [0.0; 52];
-
-                            let mut cum_bb = 0.0;
-
-                            for group in groups {
-                                let mut current_cum_bb = 0.0;
-
-                                let mut current_collisions_bb = [0.0; 52];
-                                // forward pass
-                                for &(_, index) in group {
-                                    let index = index as usize;
-                                    let cards = card_order[index];
-                                    if card_order[index] & self.cards > 0 {
-                                        continue;
-                                    }
-                                    let card = Evaluator::separate_cards(cards);
-                                    bb_res[index] += cum_bb;
-                                    current_cum_bb += range_sb[index];
-                                    for c in card {
-                                        bb_res[index] -= collisions_bb[c];
-                                        current_collisions_bb[c] += range_sb[index];
-                                    }
-                                }
-                                cum_bb += current_cum_bb * self.sbbet;
-                                for i in 0..52 {
-                                    collisions_bb[i] += current_collisions_bb[i] * self.sbbet;
-                                }
-                            }
-
-                            let mut collisions_bb = [0.0; 52];
-
-                            let mut cum_bb = 0.0;
-
-                            let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
-
-                            for group in groups.rev() {
-                                let mut current_cum_bb = 0.0;
-
-                                let mut current_collisions_bb = [0.0; 52];
-                                // forward pass
-                                for &(_, index) in group {
-                                    let index = index as usize;
-                                    let cards = card_order[index];
-                                    if card_order[index] & self.cards > 0 {
-                                        continue;
-                                    }
-                                    let card = Evaluator::separate_cards(cards);
-                                    bb_res[index] -= cum_bb;
-                                    current_cum_bb += range_sb[index];
-                                    for c in card {
-                                        bb_res[index] += collisions_bb[c];
-                                        current_collisions_bb[c] += range_sb[index];
-                                    }
-                                }
-                                cum_bb += current_cum_bb * self.bbbet;
-                                for i in 0..52 {
-                                    collisions_bb[i] += current_collisions_bb[i] * self.bbbet;
-                                }
-                            }
-                        }
-                    }
-                    SBWins => {
-                        if updating_player == Small {
-                            let mut bb_sum = 0.0;
-                            let mut collisions_sb = [0.0; 52];
-                            for (index, &cards) in card_order.iter().enumerate() {
-                                if cards & self.cards > 0 {
-                                    continue;
-                                }
-                                bb_sum += range_bb[index];
-                                let card = Evaluator::separate_cards(cards);
-                                for c in card {
-                                    collisions_sb[c] += range_bb[index];
-                                }
-                            }
-                            for index in 0..1326 {
-                                if card_order[index] & self.cards > 0 {
-                                    continue;
-                                }
-                                sb_res[index] = bb_sum + range_bb[index]; // inclusion exclusion
-                                let cards = Evaluator::separate_cards(card_order[index]);
-                                for card in cards {
-                                    sb_res[index] -= collisions_sb[card];
-                                }
-                            }
-                            sb_res *= self.bbbet;
-                        }
-                        if updating_player == Big {
-                            let mut sb_sum = 0.0;
-                            let mut collisions_bb = [0.0; 52];
-                            for (index, &cards) in card_order.iter().enumerate() {
-                                if cards & self.cards > 0 {
-                                    continue;
-                                }
-                                sb_sum += range_sb[index];
-                                let card = Evaluator::separate_cards(cards);
-                                for c in card {
-                                    collisions_bb[c] += range_sb[index];
-                                }
-                            }
-                            for index in 0..1326 {
-                                if card_order[index] & self.cards > 0 {
-                                    continue;
-                                }
-                                bb_res[index] = sb_sum + range_sb[index];
-                                let cards = Evaluator::separate_cards(card_order[index]);
-                                for card in cards {
-                                    bb_res[index] -= collisions_bb[card];
-                                }
-                            }
-                            bb_res *= -self.bbbet;
-                        }
-                    }
-                    BBWins => {
-                        if updating_player == Small {
-                            let mut bb_sum = 0.0;
-                            let mut collisions_sb = [0.0; 52];
-                            for (index, &cards) in card_order.iter().enumerate() {
-                                if cards & self.cards > 0 {
-                                    continue;
-                                }
-                                bb_sum += range_bb[index];
-                                let card = Evaluator::separate_cards(cards);
-                                for c in card {
-                                    collisions_sb[c] += range_bb[index];
-                                }
-                            }
-                            for index in 0..1326 {
-                                if card_order[index] & self.cards > 0 {
-                                    continue;
-                                }
-                                sb_res[index] = bb_sum + range_bb[index]; // inclusion exclusion
-                                let cards = Evaluator::separate_cards(card_order[index]);
-                                for card in cards {
-                                    sb_res[index] -= collisions_sb[card];
-                                }
-                            }
-                            sb_res *= -self.sbbet;
-                        }
-                        if updating_player == Big {
-                            let mut sb_sum = 0.0;
-                            let mut collisions_bb = [0.0; 52];
-                            for (index, &cards) in card_order.iter().enumerate() {
-                                if cards & self.cards > 0 {
-                                    continue;
-                                }
-                                sb_sum += range_sb[index];
-                                let card = Evaluator::separate_cards(cards);
-                                for c in card {
-                                    collisions_bb[c] += range_sb[index];
-                                }
-                            }
-                            for index in 0..1326 {
-                                if card_order[index] & self.cards > 0 {
-                                    continue;
-                                }
-                                bb_res[index] = sb_sum + range_sb[index];
-                                let cards = Evaluator::separate_cards(card_order[index]);
-                                for card in cards {
-                                    bb_res[index] -= collisions_bb[card];
-                                }
-                            }
-                            bb_res *= self.sbbet;
-                        }
-                    }
-                    _ => todo!(),
-                }
-                let (util, _exploitability) = match updating_player {
-                    Small => (sb_res, bb_res),
-                    Big => (bb_res, sb_res),
+            Showdown => {
+                let mut result = Vector::default();
+                let (self_bet, opponent_bet) = match updating_player {
+                    Small => (self.sbbet, self.bbbet),
+                    Big => (self.bbbet, self.sbbet),
                 };
-                util
+
+                let sorted = evaluator.vectorized_eval(self.cards);
+                let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
+
+                let mut collisions = [0.0; 52];
+
+                let mut cumulative = 0.0;
+
+                for group in groups {
+                    let mut current_cumumulative = 0.0;
+
+                    let mut current_collisions = [0.0; 52];
+                    // forward pass
+                    for &(_, index) in group {
+                        let index = index as usize;
+                        let cards = card_order[index];
+                        if card_order[index] & self.cards > 0 {
+                            continue;
+                        }
+                        let card = Evaluator::separate_cards(cards);
+                        result[index] += cumulative;
+                        current_cumumulative += opponent_range[index];
+                        for c in card {
+                            result[index] -= collisions[c];
+                            current_collisions[c] += opponent_range[index];
+                        }
+                    }
+                    cumulative += current_cumumulative * opponent_bet;
+                    for i in 0..52 {
+                        collisions[i] += current_collisions[i] * opponent_bet;
+                    }
+                }
+
+                let mut collisions = [0.0; 52];
+
+                let mut cumulative = 0.0;
+
+                let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
+
+                for group in groups.rev() {
+                    let mut current_cumulative = 0.0;
+
+                    let mut current_collisions = [0.0; 52];
+                    // forward pass
+                    for &(_, index) in group {
+                        let index = index as usize;
+                        let cards = card_order[index];
+                        if card_order[index] & self.cards > 0 {
+                            continue;
+                        }
+                        let card = Evaluator::separate_cards(cards);
+                        result[index] -= cumulative;
+                        current_cumulative += opponent_range[index];
+                        for c in card {
+                            result[index] += collisions[c];
+                            current_collisions[c] += opponent_range[index];
+                        }
+                    }
+                    cumulative += current_cumulative * self_bet;
+                    for i in 0..52 {
+                        collisions[i] += current_collisions[i] * self_bet;
+                    }
+                }
+                result
+            }
+            SBWins => {
+                let mut result = Vector::default();
+                let mut range_sum = 0.0;
+                let mut collisions = [0.0; 52];
+                for (index, &cards) in card_order.iter().enumerate() {
+                    if cards & self.cards > 0 {
+                        continue;
+                    }
+                    range_sum += opponent_range[index];
+                    let card = Evaluator::separate_cards(cards);
+                    for c in card {
+                        collisions[c] += opponent_range[index];
+                    }
+                }
+                for index in 0..1326 {
+                    if card_order[index] & self.cards > 0 {
+                        continue;
+                    }
+                    result[index] = range_sum + opponent_range[index];
+                    let cards = Evaluator::separate_cards(card_order[index]);
+                    for card in cards {
+                        result[index] -= collisions[card];
+                    }
+                }
+                result *= self.bbbet * if updating_player == Small { 1.0 } else { -1.0 };
+                result
+            }
+            BBWins => {
+                let mut result = Vector::default();
+                let mut range_sum = 0.0;
+                let mut collisions = [0.0; 52];
+                for (index, &cards) in card_order.iter().enumerate() {
+                    if cards & self.cards > 0 {
+                        continue;
+                    }
+                    range_sum += opponent_range[index];
+                    let card = Evaluator::separate_cards(cards);
+                    for c in card {
+                        collisions[c] += opponent_range[index];
+                    }
+                }
+                for index in 0..1326 {
+                    if card_order[index] & self.cards > 0 {
+                        continue;
+                    }
+                    result[index] = range_sum + opponent_range[index];
+                    let cards = Evaluator::separate_cards(card_order[index]);
+                    for card in cards {
+                        result[index] -= collisions[card];
+                    }
+                }
+                result *= self.sbbet * if updating_player == Small { -1.0 } else { 1.0 };
+                result
             }
             Flop => {
                 let mut total = Vector::default();
-                let range_sb_new = *range_sb * (1.0 / 22100.0);
-                let range_bb_new = *range_bb * (1.0 / 22100.0);
                 for next_state in self.next_states.iter_mut() {
                     let res = next_state.evaluate_state(
-                        &range_sb_new,
-                        &range_bb_new,
+                        &(*opponent_range * (1.0 / 22100.0)),
                         evaluator,
                         card_order,
                         updating_player,
+                        calc_exploit,
                     );
                     for &permutation in &next_state.permutations {
                         total += permute(permutation, res)
-                    }
-                }
-                total
-            }
-        }
-    }
-
-    pub fn calc_exploit(
-        &mut self,
-        range_sb: &Vector,
-        range_bb: &Vector,
-        evaluator: &Evaluator,
-        card_order: &Vec<u64>,
-    ) -> [Vector; 2] {
-        match self.terminal {
-            NonTerminal => {
-                // get avg strategy and individual payoffs
-                let (mut sb_avg, mut bb_avg) = match self.next_to_act {
-                    Small => (
-                        Vector {
-                            values: [f64::NEG_INFINITY; 1326],
-                        },
-                        Vector::default(),
-                    ),
-                    Big => (
-                        Vector::default(),
-                        Vector {
-                            values: [f64::NEG_INFINITY; 1326],
-                        },
-                    ),
-                };
-
-                let strategy = self.card_strategies.as_ref().unwrap().get_strategy();
-
-                for (next, action_prob) in zip(self.next_states.iter_mut(), strategy) {
-                    let [sb_res, bb_res] = match self.next_to_act {
-                        Small => next.calc_exploit(
-                            &(*range_sb * action_prob),
-                            range_bb,
-                            evaluator,
-                            card_order,
-                        ),
-                        Big => next.calc_exploit(
-                            range_sb,
-                            &(*range_bb * action_prob),
-                            evaluator,
-                            card_order,
-                        ),
-                    };
-                    match self.next_to_act {
-                        Small => {
-                            for i in 0..1326 {
-                                sb_avg[i] = sb_avg[i].max(sb_res[i]);
-                            }
-                            bb_avg += bb_res;
-                        }
-                        Big => {
-                            sb_avg += sb_res;
-                            for i in 0..1326 {
-                                bb_avg[i] = bb_avg[i].max(bb_res[i]);
-                            }
-                        }
-                    }
-                }
-
-                [sb_avg, bb_avg]
-            }
-
-            Showdown | BBWins | SBWins => {
-                let mut sb_res = Vector::default();
-                let mut bb_res = Vector::default();
-                match self.terminal {
-                    Showdown => {
-                        let sorted = evaluator.vectorized_eval(self.cards);
-                        //assert_eq!(new_version.clone(), sorted.clone());
-
-                        let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
-
-                        let mut collisions_sb = [0.0; 52];
-
-                        let mut cum_sb = 0.0;
-
-                        for group in groups {
-                            let mut current_cum_sb = 0.0;
-
-                            let mut current_collisions_sb = [0.0; 52];
-                            // forward pass
-                            for &(_, index) in group {
-                                let index = index as usize;
-                                let cards = card_order[index];
-                                if card_order[index] & self.cards > 0 {
-                                    continue;
-                                }
-                                let card = Evaluator::separate_cards(cards);
-                                sb_res[index] += cum_sb;
-                                current_cum_sb += range_bb[index];
-                                for c in card {
-                                    sb_res[index] -= collisions_sb[c];
-                                    current_collisions_sb[c] += range_bb[index];
-                                }
-                            }
-                            cum_sb += current_cum_sb * self.bbbet;
-                            for i in 0..52 {
-                                collisions_sb[i] += current_collisions_sb[i] * self.bbbet;
-                            }
-                        }
-
-                        let mut collisions_sb = [0.0; 52];
-
-                        let mut cum_sb = 0.0;
-
-                        let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
-
-                        for group in groups.rev() {
-                            let mut current_cum_sb = 0.0;
-
-                            let mut current_collisions_sb = [0.0; 52];
-                            // forward pass
-                            for &(_, index) in group {
-                                let index = index as usize;
-                                let cards = card_order[index];
-                                if card_order[index] & self.cards > 0 {
-                                    continue;
-                                }
-                                let card = Evaluator::separate_cards(cards);
-                                sb_res[index] -= cum_sb;
-                                current_cum_sb += range_bb[index];
-                                for c in card {
-                                    sb_res[index] += collisions_sb[c];
-                                    current_collisions_sb[c] += range_bb[index];
-                                }
-                            }
-                            cum_sb += current_cum_sb * self.sbbet;
-                            for i in 0..52 {
-                                collisions_sb[i] += current_collisions_sb[i] * self.sbbet;
-                            }
-                        }
-                        let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
-
-                        let mut collisions_bb = [0.0; 52];
-
-                        let mut cum_bb = 0.0;
-
-                        for group in groups {
-                            let mut current_cum_bb = 0.0;
-
-                            let mut current_collisions_bb = [0.0; 52];
-                            // forward pass
-                            for &(_, index) in group {
-                                let index = index as usize;
-                                let cards = card_order[index];
-                                if card_order[index] & self.cards > 0 {
-                                    continue;
-                                }
-                                let card = Evaluator::separate_cards(cards);
-                                bb_res[index] += cum_bb;
-                                current_cum_bb += range_sb[index];
-                                for c in card {
-                                    bb_res[index] -= collisions_bb[c];
-                                    current_collisions_bb[c] += range_sb[index];
-                                }
-                            }
-                            cum_bb += current_cum_bb * self.sbbet;
-                            for i in 0..52 {
-                                collisions_bb[i] += current_collisions_bb[i] * self.sbbet;
-                            }
-                        }
-
-                        let mut collisions_bb = [0.0; 52];
-
-                        let mut cum_bb = 0.0;
-
-                        let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
-
-                        for group in groups.rev() {
-                            let mut current_cum_bb = 0.0;
-
-                            let mut current_collisions_bb = [0.0; 52];
-                            // forward pass
-                            for &(_, index) in group {
-                                let index = index as usize;
-                                let cards = card_order[index];
-                                if card_order[index] & self.cards > 0 {
-                                    continue;
-                                }
-                                let card = Evaluator::separate_cards(cards);
-                                bb_res[index] -= cum_bb;
-                                current_cum_bb += range_sb[index];
-                                for c in card {
-                                    bb_res[index] += collisions_bb[c];
-                                    current_collisions_bb[c] += range_sb[index];
-                                }
-                            }
-                            cum_bb += current_cum_bb * self.bbbet;
-                            for i in 0..52 {
-                                collisions_bb[i] += current_collisions_bb[i] * self.bbbet;
-                            }
-                        }
-                    }
-                    SBWins => {
-                        let mut bb_sum = 0.0;
-                        let mut collisions_sb = [0.0; 52];
-                        for (index, &cards) in card_order.iter().enumerate() {
-                            if cards & self.cards > 0 {
-                                continue;
-                            }
-                            bb_sum += range_bb[index];
-                            let card = Evaluator::separate_cards(cards);
-                            for c in card {
-                                collisions_sb[c] += range_bb[index];
-                            }
-                        }
-                        for index in 0..1326 {
-                            if card_order[index] & self.cards > 0 {
-                                continue;
-                            }
-                            sb_res[index] = bb_sum + range_bb[index]; // inclusion exclusion
-                            let cards = Evaluator::separate_cards(card_order[index]);
-                            for card in cards {
-                                sb_res[index] -= collisions_sb[card];
-                            }
-                        }
-                        sb_res *= self.bbbet;
-
-                        let mut sb_sum = 0.0;
-                        let mut collisions_bb = [0.0; 52];
-                        for (index, &cards) in card_order.iter().enumerate() {
-                            if cards & self.cards > 0 {
-                                continue;
-                            }
-                            sb_sum += range_sb[index];
-                            let card = Evaluator::separate_cards(cards);
-                            for c in card {
-                                collisions_bb[c] += range_sb[index];
-                            }
-                        }
-                        for index in 0..1326 {
-                            if card_order[index] & self.cards > 0 {
-                                continue;
-                            }
-                            bb_res[index] = sb_sum + range_sb[index];
-                            let cards = Evaluator::separate_cards(card_order[index]);
-                            for card in cards {
-                                bb_res[index] -= collisions_bb[card];
-                            }
-                        }
-                        bb_res *= -self.bbbet;
-                    }
-                    BBWins => {
-                        let mut bb_sum = 0.0;
-                        let mut collisions_sb = [0.0; 52];
-                        for (index, &cards) in card_order.iter().enumerate() {
-                            if cards & self.cards > 0 {
-                                continue;
-                            }
-                            bb_sum += range_bb[index];
-                            let card = Evaluator::separate_cards(cards);
-                            for c in card {
-                                collisions_sb[c] += range_bb[index];
-                            }
-                        }
-                        for index in 0..1326 {
-                            if card_order[index] & self.cards > 0 {
-                                continue;
-                            }
-                            sb_res[index] = bb_sum + range_bb[index]; // inclusion exclusion
-                            let cards = Evaluator::separate_cards(card_order[index]);
-                            for card in cards {
-                                sb_res[index] -= collisions_sb[card];
-                            }
-                        }
-                        sb_res *= -self.sbbet;
-
-                        let mut sb_sum = 0.0;
-                        let mut collisions_bb = [0.0; 52];
-                        for (index, &cards) in card_order.iter().enumerate() {
-                            if cards & self.cards > 0 {
-                                continue;
-                            }
-                            sb_sum += range_sb[index];
-                            let card = Evaluator::separate_cards(cards);
-                            for c in card {
-                                collisions_bb[c] += range_sb[index];
-                            }
-                        }
-                        for index in 0..1326 {
-                            if card_order[index] & self.cards > 0 {
-                                continue;
-                            }
-                            bb_res[index] = sb_sum + range_sb[index];
-                            let cards = Evaluator::separate_cards(card_order[index]);
-                            for card in cards {
-                                bb_res[index] -= collisions_bb[card];
-                            }
-                        }
-                        bb_res *= self.sbbet;
-                    }
-                    _ => todo!(),
-                }
-                [sb_res, bb_res]
-            }
-            Flop => {
-                let mut total = [Vector::default(); 2];
-                let range_sb_new = *range_sb * (1.0 / 22100.0);
-                let range_bb_new = *range_bb * (1.0 / 22100.0);
-                for next_state in self.next_states.iter_mut() {
-                    let [sb_res, bb_res] = next_state.calc_exploit(
-                        &range_sb_new,
-                        &range_bb_new,
-                        evaluator,
-                        card_order,
-                    );
-                    for &permutation in &next_state.permutations {
-                        total[0] += permute(permutation, sb_res);
-                        total[1] += permute(permutation, bb_res);
                     }
                 }
                 total
