@@ -3,30 +3,34 @@ use crate::enums::Player::*;
 use crate::enums::TerminalState::*;
 use crate::enums::*;
 use crate::evaluator::Evaluator;
+use crate::permutation_handler::permute;
 use crate::strategy::Strategy;
+use crate::vector::Vector;
 use itertools::Itertools;
-use poker::Card;
-use std::collections::HashMap;
+use poker::Suit::{Clubs, Diamonds, Hearts, Spades};
+use poker::{Card, Suit};
+use std::collections::HashSet;
 use std::iter::zip;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct State {
     terminal: TerminalState,
     pub action: Action,
     pub cards: u64,
-    sbbet: f32,
-    bbbet: f32,
+    sbbet: f64,
+    bbbet: f64,
     next_to_act: Player,
-    card_strategies: Vec<Strategy>,
+    pub card_strategies: Option<Strategy>,
     next_states: Vec<State>,
+    permutations: Vec<[Suit; 4]>,
 }
 
 impl State {
     pub fn new(
         terminal: TerminalState,
         action: Action,
-        sbbet: f32,
-        bbbet: f32,
+        sbbet: f64,
+        bbbet: f64,
         next_to_act: Player,
     ) -> Self {
         State {
@@ -36,8 +40,9 @@ impl State {
             sbbet,
             bbbet,
             next_to_act,
-            card_strategies: vec![Strategy::new(); 1326],
+            card_strategies: Some(Strategy::new()),
             next_states: vec![],
+            permutations: vec![],
         }
     }
 
@@ -46,285 +51,345 @@ impl State {
     }
 
     pub fn get_action(&self, action: Action, evaluator: &Evaluator) -> Vec<State> {
-        match self.next_to_act {
-            Small => match action {
-                Fold => vec![State {
-                    terminal: BBWins,
-                    action,
-                    cards: self.cards.clone(),
-                    sbbet: self.sbbet,
-                    bbbet: self.bbbet,
-                    next_to_act: Big,
-                    card_strategies: vec![],
-                    next_states: vec![],
-                }],
-                Check => vec![State {
-                    terminal: NonTerminal,
-                    action,
-                    cards: self.cards.clone(),
-                    sbbet: self.sbbet,
-                    bbbet: self.bbbet,
-                    next_to_act: Big,
-                    card_strategies: vec![Strategy::new(); 1326],
-                    next_states: vec![],
-                }],
-                Call => {
-                    if self.cards == 0 {
-                        vec![State {
-                            terminal: Flop,
-                            action,
-                            cards: self.cards.clone(),
-                            sbbet: self.bbbet,
-                            bbbet: self.bbbet,
-                            next_to_act: Big,
-                            card_strategies: vec![],
-                            next_states: vec![],
-                        }]
-                    } else {
-                        vec![State {
-                            terminal: Showdown,
-                            action,
-                            cards: self.cards.clone(),
-                            sbbet: self.bbbet,
-                            bbbet: self.bbbet,
-                            next_to_act: Big,
-                            card_strategies: vec![],
-                            next_states: vec![],
-                        }]
-                    }
+        let opponent = match self.next_to_act {
+            Small => Big,
+            Big => Small,
+        };
+        let fold_winner = match self.next_to_act {
+            Small => BBWins,
+            Big => SBWins,
+        };
+        let other_bet = match self.next_to_act {
+            Small => self.bbbet,
+            Big => self.sbbet,
+        };
+        match action {
+            Fold => vec![State {
+                terminal: fold_winner,
+                action,
+                cards: self.cards,
+                sbbet: self.sbbet,
+                bbbet: self.bbbet,
+                next_to_act: opponent,
+                card_strategies: None,
+                next_states: vec![],
+                permutations: vec![],
+            }],
+            Check => vec![State {
+                terminal: NonTerminal,
+                action,
+                cards: self.cards,
+                sbbet: self.sbbet,
+                bbbet: self.bbbet,
+                next_to_act: opponent,
+                card_strategies: Some(Strategy::new()),
+                next_states: vec![],
+                permutations: vec![],
+            }],
+            Call => {
+                if self.cards == 0 {
+                    vec![State {
+                        terminal: Flop,
+                        action,
+                        cards: self.cards,
+                        sbbet: other_bet,
+                        bbbet: other_bet,
+                        next_to_act: opponent,
+                        card_strategies: None,
+                        next_states: vec![],
+                        permutations: vec![],
+                    }]
+                } else {
+                    vec![State {
+                        terminal: Showdown,
+                        action,
+                        cards: self.cards,
+                        sbbet: other_bet,
+                        bbbet: other_bet,
+                        next_to_act: opponent,
+                        card_strategies: None,
+                        next_states: vec![],
+                        permutations: vec![],
+                    }]
                 }
+            }
 
-                Raise => vec![State {
-                    terminal: NonTerminal,
-                    action,
-                    cards: self.cards.clone(),
-                    sbbet: self.bbbet + 1.0,
-                    bbbet: self.bbbet,
-                    next_to_act: Big,
-                    card_strategies: vec![Strategy::new(); 1326],
-                    next_states: vec![],
-                }],
-                Deal => {
-                    let deck = Card::generate_deck();
-                    let flops = deck.combinations(3);
-                    let mut next_states = Vec::new();
-                    for flop in flops {
-                        let next_state = State {
-                            terminal: NonTerminal,
-                            action: Deal,
-                            cards: evaluator.cards_to_u64(&flop),
-                            sbbet: self.sbbet,
-                            bbbet: self.bbbet,
-                            next_to_act: Small,
-                            card_strategies: vec![Strategy::new(); 1326],
-                            next_states: vec![],
-                        };
-                        next_states.push(next_state)
+            Raise => vec![State {
+                terminal: NonTerminal,
+                action,
+                cards: self.cards,
+                sbbet: self.sbbet
+                    + match self.next_to_act {
+                        Small => 1.0,
+                        Big => 0.0,
+                    },
+                bbbet: self.bbbet
+                    + match self.next_to_act {
+                        Small => 0.0,
+                        Big => 1.0,
+                    },
+                next_to_act: opponent,
+                card_strategies: Some(Strategy::new()),
+                next_states: vec![],
+                permutations: vec![],
+            }],
+            Deal => {
+                let deck = Card::generate_deck();
+                let flops = deck.combinations(3);
+                let mut set: HashSet<u64> = HashSet::new();
+                let mut next_states = Vec::new();
+                for flop in flops {
+                    let num_flop = evaluator.cards_to_u64(&flop);
+                    if set.contains(&num_flop) {
+                        continue;
                     }
-                    assert_eq!(next_states.len(), 22100);
-                    next_states
-                }
-            },
-            Big => match action {
-                Fold => vec![State {
-                    terminal: SBWins,
-                    action,
-                    cards: self.cards.clone(),
-                    sbbet: self.sbbet,
-                    bbbet: self.bbbet,
-                    next_to_act: Small,
-                    card_strategies: vec![],
-                    next_states: vec![],
-                }],
-                Check => vec![State {
-                    terminal: NonTerminal,
-                    action,
-                    cards: self.cards.clone(),
-                    sbbet: self.sbbet,
-                    bbbet: self.bbbet,
-                    next_to_act: Small,
-                    card_strategies: vec![Strategy::new(); 1326],
-                    next_states: vec![],
-                }],
-                Call => {
-                    if self.cards == 0 {
-                        vec![State {
-                            terminal: Flop,
-                            action,
-                            cards: self.cards.clone(),
-                            sbbet: self.bbbet,
-                            bbbet: self.bbbet,
-                            next_to_act: Small,
-                            card_strategies: vec![],
-                            next_states: vec![],
-                        }]
-                    } else {
-                        vec![State {
-                            terminal: Showdown,
-                            action,
-                            cards: self.cards.clone(),
-                            sbbet: self.bbbet,
-                            bbbet: self.bbbet,
-                            next_to_act: Small,
-                            card_strategies: vec![],
-                            next_states: vec![],
-                        }]
+                    let mut possible_permutations: Vec<[Suit; 4]> = vec![];
+                    let permutations = [Clubs, Hearts, Spades, Diamonds]
+                        .into_iter()
+                        .permutations(4);
+                    for permutation in permutations {
+                        let mut perm_flop = flop.clone();
+                        for card in perm_flop.iter_mut() {
+                            let new_suit = match card.suit() {
+                                Clubs => permutation[0],
+                                Hearts => permutation[1],
+                                Spades => permutation[2],
+                                Diamonds => permutation[3],
+                            };
+                            *card = Card::new(card.rank(), new_suit);
+                        }
+                        let hand = evaluator.cards_to_u64(&perm_flop);
+                        if set.insert(hand) {
+                            possible_permutations.push(permutation.try_into().unwrap())
+                        }
                     }
-                }
 
-                Raise => vec![State {
-                    terminal: NonTerminal,
-                    action,
-                    cards: self.cards.clone(),
-                    sbbet: self.sbbet,
-                    bbbet: self.sbbet + 1.0,
-                    next_to_act: Small,
-                    card_strategies: vec![Strategy::new(); 1326],
-                    next_states: vec![],
-                }],
-                Deal => {
-                    let deck = Card::generate_deck();
-                    let flops = deck.combinations(3);
-                    let mut next_states = Vec::new();
-                    for flop in flops {
-                        let next_state = State {
-                            terminal: NonTerminal,
-                            action: Deal,
-                            cards: evaluator.cards_to_u64(&flop),
-                            sbbet: self.sbbet,
-                            bbbet: self.bbbet,
-                            next_to_act: Small,
-                            card_strategies: vec![Strategy::new(); 1326],
-                            next_states: vec![],
-                        };
-                        next_states.push(next_state)
-                    }
-                    next_states
+                    let next_state = State {
+                        terminal: NonTerminal,
+                        action: Deal,
+                        cards: num_flop,
+                        sbbet: self.sbbet,
+                        bbbet: self.bbbet,
+                        next_to_act: Small,
+                        card_strategies: Some(Strategy::new()),
+                        next_states: vec![],
+                        permutations: possible_permutations,
+                    };
+                    next_states.push(next_state)
                 }
-            },
+                next_states
+            }
         }
-    }
-
-    pub fn get_card_strategy(&mut self, card: u64, map: &HashMap<u64, usize>) -> &mut Strategy {
-        let i = map.get(&card).unwrap();
-        &mut self.card_strategies[*i]
     }
 
     pub fn evaluate_state(
         &mut self,
-        card_sb: u64,
-        card_bb: u64,
-        prob_sb: f32,
-        prob_bb: f32,
+        opponent_range: &Vector,
         evaluator: &Evaluator,
-        iteration_weight: f32,
-        card_order: &HashMap<u64, usize>,
-    ) -> f32 {
+        card_order: &Vec<u64>,
+        updating_player: Player,
+        calc_exploit: bool,
+    ) -> Vector {
+        //(util of sb, util of bb, exploitability of updating player)
         match self.terminal {
             NonTerminal => {
-                let (card, _) = match self.next_to_act {
-                    Small => (card_sb, card_bb),
-                    Big => (card_bb, card_sb),
+                // Observe: This vector is also used when calculating the exploitability
+                let mut average_strategy = if updating_player == self.next_to_act && calc_exploit {
+                    Vector::from(&[f64::NEG_INFINITY; 1326])
+                } else {
+                    Vector::default()
                 };
-                let (prob, other_prob) = match self.next_to_act {
-                    Small => (prob_sb, prob_bb),
-                    Big => (prob_bb, prob_sb),
-                };
-                // get avg strategy and individual payoffs
-                let mut avgstrat = 0.0;
-                let mut payoffs = [0.0; 2];
+                let mut results = [Vector::default(); 2];
 
-                let strategy = self
-                    .get_card_strategy(card, card_order)
-                    .get_strategy(other_prob, iteration_weight);
+                let strategy = self.card_strategies.as_ref().unwrap().get_strategy();
 
-                let mut i = 0;
-                for (next, action_prob) in zip(self.next_states.iter_mut(), strategy) {
-                    let new_prob = prob * action_prob;
-
-                    let util = match self.next_to_act {
-                        Small => -next.evaluate_state(
-                            card_sb,
-                            card_bb,
-                            new_prob,
-                            prob_bb,
+                for (a, (next, action_prob)) in
+                    zip(self.next_states.iter_mut(), strategy).enumerate()
+                {
+                    let utility = if self.next_to_act == updating_player {
+                        next.evaluate_state(
+                            opponent_range,
                             evaluator,
-                            iteration_weight,
                             card_order,
-                        ),
-                        Big => -next.evaluate_state(
-                            card_sb,
-                            card_bb,
-                            prob_sb,
-                            new_prob,
+                            updating_player,
+                            calc_exploit,
+                        )
+                    } else {
+                        next.evaluate_state(
+                            &(*opponent_range * action_prob),
                             evaluator,
-                            iteration_weight,
                             card_order,
-                        ),
+                            updating_player,
+                            calc_exploit,
+                        )
                     };
 
-                    avgstrat += util * action_prob;
-                    payoffs[i] = util;
-                    i += 1;
+                    if updating_player == self.next_to_act {
+                        if !calc_exploit {
+                            results[a] = utility;
+                            average_strategy += utility * action_prob;
+                        } else {
+                            for i in 0..1326 {
+                                average_strategy[i] = average_strategy[i].max(utility[i]);
+                            }
+                        }
+                    } else {
+                        average_strategy += utility;
+                    }
                 }
                 // update strategy
-                let mut update = [0.0; 2];
-                for (i, util) in payoffs.iter().enumerate() {
-                    let diff = util - avgstrat;
-                    let regret = diff * other_prob;
-                    update[i] = regret;
+                if self.next_to_act == updating_player && !calc_exploit {
+                    let mut update = [Vector::default(); 2];
+                    for (i, &util) in results.iter().enumerate() {
+                        update[i] = util - average_strategy;
+                    }
+                    self.card_strategies.as_mut().unwrap().update_add(&update);
                 }
-                self.get_card_strategy(card, card_order).update_add(&update);
-                return avgstrat;
+
+                average_strategy
             }
 
             Showdown => {
-                let (cards, other_cards) = match self.next_to_act {
-                    Small => (self.cards | card_sb, self.cards | card_bb),
-                    Big => (self.cards | card_bb, self.cards | card_sb),
+                let mut result = Vector::default();
+                let (self_bet, opponent_bet) = match updating_player {
+                    Small => (self.sbbet, self.bbbet),
+                    Big => (self.bbbet, self.sbbet),
                 };
-                return if evaluator.evaluate(cards) > evaluator.evaluate(other_cards) {
-                    match self.next_to_act {
-                        Small => self.bbbet,
-                        Big => self.sbbet,
+
+                let sorted = evaluator.vectorized_eval(self.cards);
+                let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
+
+                let mut collisions = [0.0; 52];
+
+                let mut cumulative = 0.0;
+
+                for group in groups {
+                    let mut current_cumumulative = 0.0;
+
+                    let mut current_collisions = [0.0; 52];
+                    // forward pass
+                    for &(_, index) in group {
+                        let index = index as usize;
+                        let cards = card_order[index];
+                        if card_order[index] & self.cards > 0 {
+                            continue;
+                        }
+                        let card = Evaluator::separate_cards(cards);
+                        result[index] += cumulative;
+                        current_cumumulative += opponent_range[index];
+                        for c in card {
+                            result[index] -= collisions[c];
+                            current_collisions[c] += opponent_range[index];
+                        }
                     }
-                } else {
-                    match self.next_to_act {
-                        Small => -self.sbbet,
-                        Big => -self.bbbet,
+                    cumulative += current_cumumulative * opponent_bet;
+                    for i in 0..52 {
+                        collisions[i] += current_collisions[i] * opponent_bet;
                     }
-                };
+                }
+
+                let mut collisions = [0.0; 52];
+
+                let mut cumulative = 0.0;
+
+                let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
+
+                for group in groups.rev() {
+                    let mut current_cumulative = 0.0;
+
+                    let mut current_collisions = [0.0; 52];
+                    // forward pass
+                    for &(_, index) in group {
+                        let index = index as usize;
+                        let cards = card_order[index];
+                        if card_order[index] & self.cards > 0 {
+                            continue;
+                        }
+                        let card = Evaluator::separate_cards(cards);
+                        result[index] -= cumulative;
+                        current_cumulative += opponent_range[index];
+                        for c in card {
+                            result[index] += collisions[c];
+                            current_collisions[c] += opponent_range[index];
+                        }
+                    }
+                    cumulative += current_cumulative * self_bet;
+                    for i in 0..52 {
+                        collisions[i] += current_collisions[i] * self_bet;
+                    }
+                }
+                result
+            }
+            SBWins => {
+                let mut result = Vector::default();
+                let mut range_sum = 0.0;
+                let mut collisions = [0.0; 52];
+                for (index, &cards) in card_order.iter().enumerate() {
+                    if cards & self.cards > 0 {
+                        continue;
+                    }
+                    range_sum += opponent_range[index];
+                    let card = Evaluator::separate_cards(cards);
+                    for c in card {
+                        collisions[c] += opponent_range[index];
+                    }
+                }
+                for index in 0..1326 {
+                    if card_order[index] & self.cards > 0 {
+                        continue;
+                    }
+                    result[index] = range_sum + opponent_range[index];
+                    let cards = Evaluator::separate_cards(card_order[index]);
+                    for card in cards {
+                        result[index] -= collisions[card];
+                    }
+                }
+                result *= self.bbbet * if updating_player == Small { 1.0 } else { -1.0 };
+                result
+            }
+            BBWins => {
+                let mut result = Vector::default();
+                let mut range_sum = 0.0;
+                let mut collisions = [0.0; 52];
+                for (index, &cards) in card_order.iter().enumerate() {
+                    if cards & self.cards > 0 {
+                        continue;
+                    }
+                    range_sum += opponent_range[index];
+                    let card = Evaluator::separate_cards(cards);
+                    for c in card {
+                        collisions[c] += opponent_range[index];
+                    }
+                }
+                for index in 0..1326 {
+                    if card_order[index] & self.cards > 0 {
+                        continue;
+                    }
+                    result[index] = range_sum + opponent_range[index];
+                    let cards = Evaluator::separate_cards(card_order[index]);
+                    for card in cards {
+                        result[index] -= collisions[card];
+                    }
+                }
+                result *= self.sbbet * if updating_player == Small { -1.0 } else { 1.0 };
+                result
             }
             Flop => {
-                let mut count = 0;
-                let mut total = 0.0;
-                let hole_cards: u64 = card_sb | card_bb;
+                let mut total = Vector::default();
                 for next_state in self.next_states.iter_mut() {
-                    let intersect = next_state.cards & hole_cards;
-                    if intersect > 0 {
-                        continue;
-                    } else {
-                        count += 1;
-                        let res = next_state.evaluate_state(
-                            card_sb,
-                            card_bb,
-                            prob_sb,
-                            prob_bb,
-                            evaluator,
-                            iteration_weight,
-                            card_order,
-                        );
-                        total += res;
+                    let res = next_state.evaluate_state(
+                        &(*opponent_range * (1.0 / 22100.0)),
+                        evaluator,
+                        card_order,
+                        updating_player,
+                        calc_exploit,
+                    );
+                    for &permutation in &next_state.permutations {
+                        total += permute(permutation, res)
                     }
                 }
-                if count != 17296 {
-                    //dbg!(set, self.next_states.len(), &self);
-                }
-                assert_eq!(count, 17296); // 17296 = 48 choose 3
-                total / count as f32
+                total
             }
-            SBWins => self.bbbet,
-            BBWins => self.sbbet,
         }
     }
 }

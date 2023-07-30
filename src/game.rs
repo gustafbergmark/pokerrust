@@ -1,16 +1,15 @@
-use crate::evaluator;
+use crate::enums::Player::{Big, Small};
 use crate::evaluator::Evaluator;
 use crate::state::State;
-use itertools::Itertools;
+use crate::vector::Vector;
 use poker::{card, Card};
-use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::time::Instant;
 
 pub(crate) struct Game {
     root: State,
-    card_order: HashMap<u64, usize>,
-    evaluator: evaluator::Evaluator,
+    card_order: Vec<u64>,
+    evaluator: Evaluator,
 }
 
 impl Debug for Game {
@@ -20,62 +19,68 @@ impl Debug for Game {
 }
 
 impl Game {
-    pub fn new(root: State, evaluator: Evaluator) -> Self {
-        let _test_pairs: Vec<([Card; 2], usize)> = vec![
-            ([card!(Jack, Hearts), card!(Jack, Clubs)], 0),
-            ([card!(Queen, Hearts), card!(Queen, Clubs)], 1),
-            ([card!(King, Hearts), card!(King, Clubs)], 2),
+    pub fn new(root: State, evaluator: Evaluator, card_order: Vec<[Card; 2]>) -> Self {
+        let _kuhn_hands: Vec<u64> = vec![
+            evaluator.cards_to_u64(&[card!(Jack, Hearts)]),
+            evaluator.cards_to_u64(&[card!(Queen, Hearts)]),
+            evaluator.cards_to_u64(&[card!(King, Hearts)]),
         ];
-        let all_pairs: Vec<(u64, usize)> = Card::generate_deck()
-            .combinations(2)
-            .enumerate()
-            .map(|(pos, cards)| (evaluator.cards_to_u64(&cards), pos))
+
+        let card_order_nums = card_order
+            .iter()
+            .map(|hand| evaluator.cards_to_u64(hand))
             .collect();
-        let card_order: HashMap<u64, usize> = all_pairs.into_iter().collect();
         Game {
             root,
-            card_order,
+            card_order: card_order_nums,
             evaluator,
         }
     }
 
-    pub fn perform_iter(&mut self, iteration_weight: f32) -> f32 {
-        let hands = self.card_order.keys().tuple_combinations();
-        let mut count = 0;
-        let mut ev = 0.0;
+    pub fn perform_iter(&mut self, iter: usize) {
         let start = Instant::now();
-        for (&c1, &c2) in hands {
-            if c1 & c2 != 0 {
-                continue;
-            }
-            ev += self.root.evaluate_state(
-                c1,
-                c2,
-                1.0,
-                1.0,
+
+        let _ = self.root.evaluate_state(
+            &Vector::ones(),
+            &self.evaluator,
+            &self.card_order,
+            Small,
+            false,
+        );
+
+        let _ = self.root.evaluate_state(
+            &Vector::ones(),
+            &self.evaluator,
+            &self.card_order,
+            Big,
+            false,
+        );
+        let iter_time = start.elapsed().as_secs_f32();
+        if iter % 1 == 0 {
+            let exp_sb = self.root.evaluate_state(
+                &Vector::ones(),
                 &self.evaluator,
-                iteration_weight,
                 &self.card_order,
+                Small,
+                true,
             );
-            ev += self.root.evaluate_state(
-                c2,
-                c1,
-                1.0,
-                1.0,
+            let exp_bb = self.root.evaluate_state(
+                &Vector::ones(),
                 &self.evaluator,
-                iteration_weight,
                 &self.card_order,
+                Big,
+                true,
             );
-            count += 1;
-            if count % 10 == 0 {
-                println!(
-                    "Finished {} hands, {}% done, time per hand: {} ms",
-                    count,
-                    count as f64 / 878475.0 * 100.0,
-                    start.elapsed().as_millis() / count
-                )
-            }
+            println!(
+                "Iteration {} done \n\
+                  Exploitability: {} mb/h \n\
+                  Iter time: {} \n\
+                  Exploit calc time: {} \n",
+                iter,
+                (exp_sb.sum() + exp_bb.sum()) * 1000.0 / 1326.0 / 1255.0,
+                iter_time,
+                start.elapsed().as_secs_f32() - iter_time,
+            );
         }
-        ev
     }
 }

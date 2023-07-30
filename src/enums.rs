@@ -1,10 +1,10 @@
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub(crate) enum Player {
     Small,
     Big,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Action {
     Fold,
     Check,
@@ -13,7 +13,7 @@ pub(crate) enum Action {
     Deal,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub(crate) enum TerminalState {
     NonTerminal,
     SBWins,
