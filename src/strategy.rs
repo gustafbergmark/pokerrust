@@ -4,7 +4,7 @@ use std::fmt::{Debug, Formatter};
 // holds historic winnings of each move and hand
 #[derive(Clone, PartialEq)]
 pub(crate) struct Strategy {
-    regrets: [Vector; 2],
+    regrets: [Vector<1326>; 2],
 }
 
 impl Debug for Strategy {
@@ -20,7 +20,7 @@ impl Strategy {
         }
     }
 
-    pub fn update_add(&mut self, update: &[Vector; 2]) {
+    pub fn update_add(&mut self, update: &[Vector<1326>; 2]) {
         for i in 0..2 {
             self.regrets[i] += update[i];
             self.regrets[i]
@@ -30,13 +30,13 @@ impl Strategy {
         }
     }
 
-    pub fn get_strategy(&self) -> [Vector; 2] {
-        let mut regret_match: [Vector; 2] = self.regrets;
+    pub fn get_strategy(&self) -> [Vector<1326>; 2] {
+        let mut regret_match: [Vector<1326>; 2] = self.regrets;
         Self::normalize(&mut regret_match);
         regret_match
     }
 
-    fn normalize(v: &mut [Vector; 2]) {
+    fn normalize(v: &mut [Vector<1326>; 2]) {
         let norm = v[0] + v[1];
         v[0] /= norm;
         v[1] /= norm;

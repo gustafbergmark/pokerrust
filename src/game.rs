@@ -8,8 +8,8 @@ use std::time::Instant;
 
 pub(crate) struct Game {
     root: State,
-    card_order: Vec<u64>,
-    evaluator: Evaluator,
+    pub card_order: [u64; 1326],
+    pub evaluator: Evaluator,
 }
 
 impl Debug for Game {
@@ -29,7 +29,9 @@ impl Game {
         let card_order_nums = card_order
             .iter()
             .map(|hand| evaluator.cards_to_u64(hand))
-            .collect();
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
         Game {
             root,
             card_order: card_order_nums,

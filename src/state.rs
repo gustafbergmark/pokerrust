@@ -17,8 +17,8 @@ pub(crate) struct State {
     terminal: TerminalState,
     pub action: Action,
     pub cards: u64,
-    sbbet: f64,
-    bbbet: f64,
+    sbbet: f32,
+    bbbet: f32,
     next_to_act: Player,
     pub card_strategies: Option<Strategy>,
     next_states: Vec<State>,
@@ -29,8 +29,8 @@ impl State {
     pub fn new(
         terminal: TerminalState,
         action: Action,
-        sbbet: f64,
-        bbbet: f64,
+        sbbet: f32,
+        bbbet: f32,
         next_to_act: Player,
     ) -> Self {
         State {
@@ -184,18 +184,18 @@ impl State {
 
     pub fn evaluate_state(
         &mut self,
-        opponent_range: &Vector,
+        opponent_range: &Vector<1326>,
         evaluator: &Evaluator,
-        card_order: &Vec<u64>,
+        card_order: &[u64; 1326],
         updating_player: Player,
         calc_exploit: bool,
-    ) -> Vector {
+    ) -> Vector<1326> {
         //(util of sb, util of bb, exploitability of updating player)
         match self.terminal {
             NonTerminal => {
                 // Observe: This vector is also used when calculating the exploitability
                 let mut average_strategy = if updating_player == self.next_to_act && calc_exploit {
-                    Vector::from(&[f64::NEG_INFINITY; 1326])
+                    Vector::from(&[f32::NEG_INFINITY; 1326])
                 } else {
                     Vector::default()
                 };
@@ -255,9 +255,13 @@ impl State {
                     Small => (self.sbbet, self.bbbet),
                     Big => (self.bbbet, self.sbbet),
                 };
+                let mut evals = [(0, 0); 1326];
+                for i in 0..1326 {
+                    evals[i] = (*evaluator.get(card_order[i] | self.cards).unwrap_or(&0), i);
+                }
+                evals.sort();
 
-                let sorted = evaluator.vectorized_eval(self.cards);
-                let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
+                let groups = evals.group_by(|&(a, _), &(b, _)| a == b);
 
                 let mut collisions = [0.0; 52];
 
@@ -292,7 +296,7 @@ impl State {
 
                 let mut cumulative = 0.0;
 
-                let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
+                let groups = evals.group_by(|&(a, _), &(b, _)| a == b);
 
                 for group in groups.rev() {
                     let mut current_cumulative = 0.0;

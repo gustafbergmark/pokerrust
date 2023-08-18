@@ -1,9 +1,10 @@
 use crate::vector::Vector;
 use poker::Suit;
 use poker::Suit::*;
+use std::iter::zip;
 use std::ops::Range;
 
-pub fn permute(permutation: [Suit; 4], v: Vector) -> Vector {
+pub fn permute(permutation: [Suit; 4], v: Vector<1326>) -> Vector<1326> {
     let mut result = [0.0; 1326];
     let values = v.values;
     let possible_suit_combinations = [
@@ -41,6 +42,24 @@ pub fn permute(permutation: [Suit; 4], v: Vector) -> Vector {
     Vector { values: result }
 }
 
+pub fn permute_u64(permutation: [Suit; 4], hand: u64) -> u64 {
+    let clubs = hand & 8191;
+    let hearts = (hand & (8191 << 13)) >> 13;
+    let spades = (hand & (8191 << 26)) >> 26;
+    let diamonds = (hand & (8191 << 39)) >> 39;
+    let mut permuted = 0;
+    for (original, suit) in zip([clubs, hearts, spades, diamonds], permutation) {
+        match suit {
+            Clubs => permuted += original,
+            Hearts => permuted += original << 13,
+            Spades => permuted += original << 26,
+            Diamonds => permuted += original << 39,
+        }
+    }
+    assert_eq!(hand.count_ones(), permuted.count_ones());
+    permuted
+}
+
 fn get_color_position(suits: [Suit; 2]) -> (Range<usize>, bool) {
     match suits {
         [Clubs, Clubs] => (0..78, false),
@@ -57,7 +76,7 @@ fn get_color_position(suits: [Suit; 2]) -> (Range<usize>, bool) {
     }
 }
 
-fn transpose(v: &mut [f64]) {
+fn transpose(v: &mut [f32]) {
     let mut res = [0.0; 169];
     for (i, chunk) in v.chunks_exact(13).enumerate() {
         for (j, val) in chunk.iter().enumerate() {
