@@ -16,6 +16,7 @@ use crate::vector::Vector;
 
 fn main() {
     /*let mut test = Vector::ones();
+    test *= 0.1;
     prefix_sum(&mut test);
     dbg!(test);
     return;*/

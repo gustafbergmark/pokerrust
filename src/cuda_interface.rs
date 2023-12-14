@@ -7,6 +7,7 @@ extern "C" {
         card_order: *const u64,
         eval: *const u16,
         groups: *const u16,
+        coll_vec: *const u16,
         groups_size: u32,
         result: *mut f32,
     );
@@ -22,6 +23,7 @@ pub fn evaluate_showdown_gpu(
     card_order: &Vec<u64>,
     eval: &Vec<u16>,
     groups: &Vec<u16>,
+    coll_vec: &Vec<u16>,
 ) -> Vector {
     let mut result = Vector::default();
     unsafe {
@@ -31,6 +33,7 @@ pub fn evaluate_showdown_gpu(
             card_order.as_ptr(),
             eval.as_ptr(),
             groups.as_ptr(),
+            coll_vec.as_ptr(),
             groups.len() as u32,
             result.values.as_mut_ptr(),
         );

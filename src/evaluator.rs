@@ -10,6 +10,8 @@ pub struct Evaluator {
     #[serde(with = "any_key_map")]
     vectorized_eval: HashMap<u64, Vec<(u16, u16)>>,
     #[serde(with = "any_key_map")]
+    gpu_eval: HashMap<u64, (Vec<u16>, Vec<u16>, Vec<u16>)>,
+    #[serde(with = "any_key_map")]
     card_nums: HashMap<Card, u64>,
 }
 #[allow(unused)]
@@ -55,12 +57,13 @@ impl Evaluator {
 
                 let deck = Card::generate_deck();
                 let mut vectorized_flop = Vec::new();
+                let mut gpu_flop = Vec::new();
                 for flop in deck.combinations(3) {
                     let mut num_hand = 0;
                     for &card in &flop {
                         num_hand |= card_nums.get(&card).unwrap();
                     }
-
+                    // calculate vectorized_eval
                     let sorted: Vec<(u16, u16)> = card_order
                         .clone()
                         .into_iter()
@@ -68,15 +71,41 @@ impl Evaluator {
                         .map(|(i, elem)| (*evals.get(&(elem | num_hand)).unwrap_or(&0), i as u16))
                         .sorted() // could be done quicker, saves max 1 sec
                         .collect();
-                    vectorized_flop.push((num_hand, sorted));
+                    vectorized_flop.push((num_hand, sorted.clone()));
+
+                    // Calculate GPU eval
+                    let groups_calc = sorted.group_by(|&(a, _), &(b, _)| a == b);
+                    let mut groups = vec![0];
+                    let mut prefix = 0;
+                    for g in groups_calc {
+                        prefix += g.len();
+                        groups.push(prefix as u16);
+                    }
+                    let order = sorted.iter().map(|e| e.1).collect::<Vec<_>>();
+
+                    let mut coll_vec = vec![vec![]; 52];
+                    for (i, &sorted_index) in order.iter().enumerate() {
+                        let hand = card_order[sorted_index as usize];
+                        let cards = Evaluator::separate_cards(hand);
+                        for c in cards {
+                            coll_vec[c].push(i as u16);
+                        }
+                    }
+                    let coll_vec = coll_vec.into_iter().flatten().collect::<Vec<_>>();
+
+                    gpu_flop.push((num_hand, (order, groups, coll_vec)))
                 }
 
                 let eval = Evaluator {
                     card_nums,
                     vectorized_eval: vectorized_flop.into_iter().collect(),
+                    gpu_eval: gpu_flop.into_iter().collect(),
                 };
                 let serialized = serde_json::to_string(&eval).unwrap();
-                fs::write("./files/evaluator.json", serialized);
+                match fs::write("./files/evaluator.json", serialized) {
+                    Ok(_) => (),
+                    Err(e) => panic!("{}", e),
+                }
                 eval
             }
         }
@@ -84,6 +113,10 @@ impl Evaluator {
 
     pub fn vectorized_eval(&self, cards: u64) -> &Vec<(u16, u16)> {
         self.vectorized_eval.get(&cards).unwrap()
+    }
+
+    pub fn gpu_eval(&self, cards: u64) -> &(Vec<u16>, Vec<u16>, Vec<u16>) {
+        self.gpu_eval.get(&cards).unwrap()
     }
 
     pub fn cards_to_u64(&self, cards: &[Card]) -> u64 {

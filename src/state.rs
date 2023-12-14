@@ -336,79 +336,28 @@ impl State {
         card_order: &Vec<u64>,
         updating_player: Player,
     ) -> Vector {
-        let eval = evaluator
-            .vectorized_eval(self.cards)
-            .into_iter()
-            .map(|e| e.1)
-            .collect::<Vec<_>>();
-
-        let groups_calc = evaluator
-            .vectorized_eval(self.cards)
-            .group_by(|&(a, _), &(b, _)| a == b);
-        let mut groups = vec![0];
-        let mut prefix = 0;
-        for g in groups_calc {
-            prefix += g.len();
-            groups.push(prefix as u16);
-        }
-        //dbg!(&groups);
-        //dbg!(&eval);
+        let (order, groups, coll_vec) = evaluator.gpu_eval(self.cards);
         let gpu = Instant::now();
         let result_gpu = evaluate_showdown_gpu(
             &opponent_range.clone(),
             self.cards,
             card_order,
-            &eval,
-            &groups,
+            order,
+            groups,
+            coll_vec,
         );
         let gpu = gpu.elapsed().as_micros();
 
-        let mut result = Vector::default();
-
-        let sorted = evaluator.vectorized_eval(self.cards);
-        let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
-
         let cpu = Instant::now();
-        let mut cumulative = 0.0;
-
-        for group in groups {
-            let mut current_cumumulative = 0.0;
-            // forward pass
-            for &(_, index) in group {
-                let index = index as usize;
-                let cards = card_order[index];
-                if card_order[index] & self.cards > 0 {
-                    continue;
-                }
-                result[index] += cumulative;
-                current_cumumulative += opponent_range[index];
-            }
-            cumulative += current_cumumulative;
-        }
-        let mut cumulative = 0.0;
-        let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
-        for group in groups.rev() {
-            let mut current_cumulative = 0.0;
-
-            // forward pass
-            for &(_, index) in group {
-                let index = index as usize;
-                let cards = card_order[index];
-                if card_order[index] & self.cards > 0 {
-                    continue;
-                }
-                result[index] -= cumulative;
-                current_cumulative += opponent_range[index];
-            }
-            cumulative += current_cumulative;
-        }
+        let result = self.evaluate_showdown(opponent_range, evaluator, card_order, updating_player);
         let cpu = cpu.elapsed().as_micros();
         for i in 0..1326 {
-            //dbg!(i, result_gpu[i], result_gpu2[i]);
+            //dbg!(i, result_gpu[i], result[i]);
             assert!((result_gpu[i] - result[i]).abs() < 1e-6);
         }
+        //panic!("Run once");
         println!("COMPLETE {} cpu {} gpu {}", self.cards, cpu, gpu);
-        self.evaluate_showdown(opponent_range, evaluator, card_order, updating_player)
+        result
     }
 
     fn evaluate_showdown(
@@ -432,7 +381,7 @@ impl State {
         let mut cumulative = 0.0;
 
         for group in groups {
-            let mut current_cumumulative = 0.0;
+            let mut current_cumulative = 0.0;
 
             let mut current_collisions = [0.0; 52];
             // forward pass
@@ -444,15 +393,15 @@ impl State {
                 }
                 let card = Evaluator::separate_cards(cards);
                 result[index] += cumulative;
-                current_cumumulative += opponent_range[index];
+                current_cumulative += opponent_range[index];
                 for c in card {
-                    //result[index] -= collisions[c]; // Temporary to test gpu
+                    result[index] -= collisions[c];
                     current_collisions[c] += opponent_range[index];
                 }
             }
-            cumulative += current_cumumulative * opponent_bet;
+            cumulative += current_cumulative; // * opponent_bet;
             for i in 0..52 {
-                collisions[i] += current_collisions[i] * opponent_bet;
+                collisions[i] += current_collisions[i]; // * opponent_bet;
             }
         }
 
@@ -477,13 +426,13 @@ impl State {
                 result[index] -= cumulative;
                 current_cumulative += opponent_range[index];
                 for c in card {
-                    //result[index] += collisions[c]; // Temporary to test gpu
+                    result[index] += collisions[c];
                     current_collisions[c] += opponent_range[index];
                 }
             }
-            cumulative += current_cumulative * self_bet;
+            cumulative += current_cumulative; // * self_bet;
             for i in 0..52 {
-                collisions[i] += current_collisions[i] * self_bet;
+                collisions[i] += current_collisions[i]; // * self_bet;
             }
         }
         result
