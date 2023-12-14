@@ -8,6 +8,7 @@ use crate::state::State;
 use itertools::Itertools;
 use poker::Card;
 
+// there are a total of 331502 terminal states, when expanding abstractions
 pub(crate) fn flop_poker() -> Game {
     let mut card_order: Vec<[Card; 2]> = Card::generate_deck()
         .combinations(2)
