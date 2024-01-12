@@ -124,7 +124,7 @@ handle_collisions(int i, long communal_cards, long *card_order, short *eval, sho
 
 __global__ void
 evaluate_showdown_kernel(float *opponent_range, long communal_cards, long *card_order, short *eval,
-                         short *coll_vec, float *result) {
+                         short *coll_vec, float bet, float *result) {
     // Setup
     __shared__ float sorted_range[1327];
     __shared__ float sorted_eval[1326];
@@ -192,7 +192,7 @@ evaluate_showdown_kernel(float *opponent_range, long communal_cards, long *card_
     for (int b = 0; b < 11; b++) {
         int index = i * 11 + b;
         if (index < 1326) {
-            result[eval[index] & 2047] = sorted_eval[index];
+            result[eval[index] & 2047] = sorted_eval[index] * bet;
         }
     }
     __syncthreads();
@@ -215,7 +215,7 @@ void prefix_sum_cuda(float *v) {
 }
 
 void evaluate_showdown_cuda(float *opponent_range, long communal_cards, long *card_order, short *eval,
-                            short *coll_vec, float *result) {
+                            short *coll_vec, float bet, float *result) {
     float *device_opponent_range;
     cudaMalloc(&device_opponent_range, 1326 * sizeof(float));
     cudaMemcpy(device_opponent_range, opponent_range, 1326 * sizeof(float), cudaMemcpyHostToDevice);
@@ -236,7 +236,7 @@ void evaluate_showdown_cuda(float *opponent_range, long communal_cards, long *ca
     cudaMemcpy(device_coll_vec, coll_vec, 52 * 51 * sizeof(short), cudaMemcpyHostToDevice);
 
     evaluate_showdown_kernel<<<1, 128>>>(device_opponent_range, communal_cards, device_card_order, device_eval,
-                                         device_coll_vec, device_result);
+                                         device_coll_vec, bet, device_result);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess)
         printf("Error: %s\n", cudaGetErrorString(err));    cudaDeviceSynchronize();

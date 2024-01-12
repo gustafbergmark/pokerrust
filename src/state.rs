@@ -329,60 +329,8 @@ impl State {
             Showdown => {
                 self.evaluate_showdown2(opponent_range, evaluator, card_order, updating_player)
             }
-            SBWins => {
-                let mut result = Vector::default();
-                let mut range_sum = 0.0;
-                let mut collisions = [0.0; 52];
-                for (index, &cards) in card_order.iter().enumerate() {
-                    if cards & self.cards > 0 {
-                        continue;
-                    }
-                    range_sum += opponent_range[index];
-                    let card = Evaluator::separate_cards(cards);
-                    for c in card {
-                        collisions[c] += opponent_range[index];
-                    }
-                }
-                for index in 0..1326 {
-                    if card_order[index] & self.cards > 0 {
-                        continue;
-                    }
-                    result[index] = range_sum + opponent_range[index];
-                    let cards = Evaluator::separate_cards(card_order[index]);
-                    for card in cards {
-                        result[index] -= collisions[card];
-                    }
-                }
-                result *= self.bbbet * if updating_player == Small { 1.0 } else { -1.0 };
-                result
-            }
-            BBWins => {
-                let mut result = Vector::default();
-                let mut range_sum = 0.0;
-                let mut collisions = [0.0; 52];
-                for (index, &cards) in card_order.iter().enumerate() {
-                    if cards & self.cards > 0 {
-                        continue;
-                    }
-                    range_sum += opponent_range[index];
-                    let card = Evaluator::separate_cards(cards);
-                    for c in card {
-                        collisions[c] += opponent_range[index];
-                    }
-                }
-                for index in 0..1326 {
-                    if card_order[index] & self.cards > 0 {
-                        continue;
-                    }
-                    result[index] = range_sum + opponent_range[index];
-                    let cards = Evaluator::separate_cards(card_order[index]);
-                    for card in cards {
-                        result[index] -= collisions[card];
-                    }
-                }
-                result *= self.sbbet * if updating_player == Small { -1.0 } else { 1.0 };
-                result
-            }
+            SBWins => self.evaluate_fold(opponent_range, card_order, updating_player, Big),
+            BBWins => self.evaluate_fold(opponent_range, card_order, updating_player, Small),
             Flop => {
                 let mut total = Vector::default();
                 let mut count = 0.0;
@@ -443,6 +391,49 @@ impl State {
         }
     }
 
+    fn evaluate_fold(
+        &self,
+        opponent_range: &Vector,
+        card_order: &Vec<u64>,
+        updating_player: Player,
+        folding_player: Player,
+    ) -> Vector {
+        let mut result = Vector::default();
+        let mut range_sum = 0.0;
+        let mut collisions = [0.0; 52];
+        for (index, &cards) in card_order.iter().enumerate() {
+            if cards & self.cards > 0 {
+                continue;
+            }
+            range_sum += opponent_range[index];
+            let card = Evaluator::separate_cards(cards);
+            for c in card {
+                collisions[c] += opponent_range[index];
+            }
+        }
+        for index in 0..1326 {
+            if card_order[index] & self.cards > 0 {
+                continue;
+            }
+            result[index] = range_sum + opponent_range[index];
+            let cards = Evaluator::separate_cards(card_order[index]);
+            for card in cards {
+                result[index] -= collisions[card];
+            }
+        }
+        let bet = match folding_player {
+            Small => self.sbbet,
+            Big => self.bbbet,
+        };
+        result *= bet
+            * if updating_player == folding_player {
+                -1.0
+            } else {
+                1.0
+            };
+        result
+    }
+
     fn evaluate_showdown2(
         &self,
         opponent_range: &Vector,
@@ -450,11 +441,19 @@ impl State {
         card_order: &Vec<u64>,
         updating_player: Player,
     ) -> Vector {
+        assert_eq!(self.sbbet, self.bbbet);
+        let bet = self.sbbet;
         let eval = evaluator.vectorized_eval(self.cards);
         let coll = evaluator.collisions(self.cards);
         let gpu = Instant::now();
-        let result_gpu =
-            evaluate_showdown_gpu(&opponent_range.clone(), self.cards, card_order, eval, coll);
+        let result_gpu = evaluate_showdown_gpu(
+            &opponent_range.clone(),
+            self.cards,
+            card_order,
+            eval,
+            coll,
+            bet,
+        );
         let gpu = gpu.elapsed().as_micros();
 
         let cpu = Instant::now();
@@ -464,8 +463,8 @@ impl State {
             //println!("{} {} {}", i, result_gpu[i], result[i]);
             assert_approx_eq!(result_gpu[i], result[i], 1e-2);
         }
-        panic!("Run once");
-        //println!("COMPLETE {} cpu {} gpu {}", self.cards, cpu, gpu);
+        //panic!("Run once");
+        println!("COMPLETE {} cpu {} gpu {}", self.cards, cpu, gpu);
         result
     }
 
@@ -517,9 +516,9 @@ impl State {
                     current_collisions[c] += opponent_range[index];
                 }
             }
-            cumulative += current_cumulative; // * opponent_bet; //TODO
+            cumulative += current_cumulative * opponent_bet;
             for i in 0..52 {
-                collisions[i] += current_collisions[i]; // * opponent_bet; //TODO
+                collisions[i] += current_collisions[i] * opponent_bet;
             }
         }
 
@@ -545,9 +544,9 @@ impl State {
                     current_collisions[c] += opponent_range[index];
                 }
             }
-            cumulative += current_cumulative; // * self_bet; //TODO
+            cumulative += current_cumulative * self_bet;
             for i in 0..52 {
-                collisions[i] += current_collisions[i]; // * self_bet; //TODO
+                collisions[i] += current_collisions[i] * self_bet;
             }
         }
 
@@ -565,9 +564,9 @@ impl State {
         //         let hand1 = evaluator.u64_to_cards(hand1 | self.cards);
         //         let hand2 = evaluator.u64_to_cards(hand2 | self.cards);
         //         if (peval.evaluate(&hand1).unwrap() > peval.evaluate(&hand2).unwrap()) {
-        //             res[i1] += opponent_range[i2]; // * opponent_bet; //TODO
+        //             res[i1] += opponent_range[i2] * opponent_bet;
         //         } else if (peval.evaluate(&hand1).unwrap() < peval.evaluate(&hand2).unwrap()) {
-        //             res[i1] -= opponent_range[i2]; // * self_bet; //TODO
+        //             res[i1] -= opponent_range[i2] * self_bet;
         //         };
         //     }
         // }
