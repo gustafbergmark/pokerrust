@@ -7,44 +7,73 @@ use crate::game::Game;
 use crate::state::State;
 use itertools::Itertools;
 use poker::Card;
+use std::time::Instant;
 
-// there are a total of 331502 terminal states, when expanding abstractions
-pub(crate) fn flop_poker() -> Game {
+// A variant where the flop is fixed, and no raising the first two rounds of betting.
+// Should be about 1 GB in size
+pub(crate) fn fixed_flop_poker() -> Game<'static> {
     let mut card_order: Vec<[Card; 2]> = Card::generate_deck()
         .combinations(2)
         .map(|e| e.try_into().unwrap())
         .collect();
     card_order.sort();
-    let mut root = State::new(NonTerminal, Deal, 1.0, 1.0, Small);
+    let mut root = State::new(NonTerminal, DealHole, 0.5, 1.0, Small);
+    let start = Instant::now();
     let evaluator = Evaluator::new(&card_order);
-    let _states = build(&mut root, &evaluator);
+    println!(
+        "Evaluator created in {} seconds",
+        start.elapsed().as_secs_f32()
+    );
+    let start = Instant::now();
+    let _states = build(&mut root, &evaluator, 0);
     //dbg!(_states);
+    println!("Game created in {} seconds", start.elapsed().as_secs_f32());
     Game::new(root, evaluator, card_order)
 }
 
-fn build(state: &mut State, evaluator: &Evaluator) -> usize {
+fn build(state: &mut State, evaluator: &Evaluator, raises: u8) -> usize {
     let mut count = 1;
-    for action in possible_actions(state) {
+    for action in possible_actions(state, raises) {
+        let new_raises = raises
+            + match action {
+                Raise => 1,
+                _ => 0,
+            };
         for mut next_state in state.get_action(action, evaluator) {
-            count += build(&mut next_state, evaluator);
+            count += build(&mut next_state, evaluator, new_raises);
             state.add_action(next_state);
         }
     }
     count
 }
 
-fn possible_actions(state: &State) -> Vec<Action> {
+fn possible_actions(state: &State, raises: u8) -> Vec<Action> {
     match state.action {
         Fold => vec![],
-        Check => vec![Call, Raise],
-        Call => {
-            if state.cards == 0 {
-                vec![Deal]
+        Check => {
+            if state.cards.count_ones() <= 3 {
+                vec![Call]
             } else {
-                vec![]
+                vec![Call, Raise]
             }
         }
-        Raise => vec![Fold, Call],
-        Deal => vec![Check, Raise],
+        Call => match state.cards.count_ones() {
+            0 => vec![DealFlop],
+            3 => vec![DealTurn],
+            4 => vec![DealRiver],
+            5 => vec![],
+            _ => panic!("Wrong number of communal cards"),
+        },
+        Raise => {
+            if raises < 4 {
+                vec![Fold, Call, Raise]
+            } else {
+                vec![Fold, Call]
+            }
+        }
+        DealHole => vec![Fold, Check],
+        DealFlop => vec![Check],
+        DealTurn => vec![Check, Raise],
+        DealRiver => vec![Check, Raise],
     }
 }

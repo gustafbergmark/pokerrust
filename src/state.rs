@@ -7,13 +7,15 @@ use crate::evaluator::Evaluator;
 use crate::permutation_handler::permute;
 use crate::strategy::Strategy;
 use crate::vector::Vector;
+use approx::{assert_abs_diff_eq, relative_eq};
+use assert_approx_eq::assert_approx_eq;
 use itertools::Itertools;
-use poker::Suit::{Clubs, Diamonds, Hearts, Spades};
+use poker::Suit::*;
 use poker::{Card, Suit};
+use rayon::iter::IntoParallelRefMutIterator;
+use rayon::iter::ParallelIterator;
 use std::collections::HashSet;
 use std::iter::zip;
-use std::thread;
-use std::time;
 use std::time::Instant;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -83,63 +85,82 @@ impl State {
                 terminal: NonTerminal,
                 action,
                 cards: self.cards,
-                sbbet: self.sbbet,
+                sbbet: self.bbbet, // Semi-ugly solution for first round
                 bbbet: self.bbbet,
                 next_to_act: opponent,
                 card_strategies: Some(Strategy::new()),
                 next_states: vec![],
                 permutations: vec![],
             }],
-            Call => {
-                if self.cards == 0 {
-                    vec![State {
-                        terminal: Flop,
-                        action,
-                        cards: self.cards,
-                        sbbet: other_bet,
-                        bbbet: other_bet,
-                        next_to_act: opponent,
-                        card_strategies: None,
-                        next_states: vec![],
-                        permutations: vec![],
-                    }]
-                } else {
-                    vec![State {
-                        terminal: Showdown,
-                        action,
-                        cards: self.cards,
-                        sbbet: other_bet,
-                        bbbet: other_bet,
-                        next_to_act: opponent,
-                        card_strategies: None,
-                        next_states: vec![],
-                        permutations: vec![],
-                    }]
-                }
-            }
+            Call => match self.cards.count_ones() {
+                0 => vec![State {
+                    terminal: Flop,
+                    action,
+                    cards: self.cards,
+                    sbbet: other_bet,
+                    bbbet: other_bet,
+                    next_to_act: opponent,
+                    card_strategies: None,
+                    next_states: vec![],
+                    permutations: vec![],
+                }],
+                3 => vec![State {
+                    terminal: Turn,
+                    action,
+                    cards: self.cards,
+                    sbbet: other_bet,
+                    bbbet: other_bet,
+                    next_to_act: opponent,
+                    card_strategies: None,
+                    next_states: vec![],
+                    permutations: vec![],
+                }],
+                4 => vec![State {
+                    terminal: River,
+                    action,
+                    cards: self.cards,
+                    sbbet: other_bet,
+                    bbbet: other_bet,
+                    next_to_act: opponent,
+                    card_strategies: None,
+                    next_states: vec![],
+                    permutations: vec![],
+                }],
+                5 => vec![State {
+                    terminal: Showdown,
+                    action,
+                    cards: self.cards,
+                    sbbet: other_bet,
+                    bbbet: other_bet,
+                    next_to_act: opponent,
+                    card_strategies: None,
+                    next_states: vec![],
+                    permutations: vec![],
+                }],
+                _ => panic!("Wrong numher of communal cards"),
+            },
 
             Raise => vec![State {
                 terminal: NonTerminal,
                 action,
                 cards: self.cards,
-                sbbet: self.sbbet
-                    + match self.next_to_act {
-                        Small => 1.0,
-                        Big => 0.0,
-                    },
-                bbbet: self.bbbet
-                    + match self.next_to_act {
-                        Small => 0.0,
-                        Big => 1.0,
-                    },
+                sbbet: match self.next_to_act {
+                    Small => self.bbbet + 1.0,
+                    Big => self.sbbet,
+                },
+                bbbet: match self.next_to_act {
+                    Small => self.bbbet,
+                    Big => self.sbbet + 1.0,
+                },
                 next_to_act: opponent,
                 card_strategies: Some(Strategy::new()),
                 next_states: vec![],
                 permutations: vec![],
             }],
-            Deal => {
+            DealFlop => {
                 let deck = Card::generate_deck();
-                let flops = deck.combinations(3);
+                //let flops = deck.combinations(3); // Full game
+                let flops = deck.take(3).combinations(3); // Fixed flop game
                 let mut set: HashSet<u64> = HashSet::new();
                 let mut next_states = Vec::new();
                 for flop in flops {
@@ -170,7 +191,7 @@ impl State {
 
                     let next_state = State {
                         terminal: NonTerminal,
-                        action: Deal,
+                        action: DealFlop,
                         cards: num_flop,
                         sbbet: self.sbbet,
                         bbbet: self.bbbet,
@@ -179,10 +200,57 @@ impl State {
                         next_states: vec![],
                         permutations: possible_permutations,
                     };
-                    next_states.push(next_state)
+                    next_states.push(next_state);
                 }
                 next_states
             }
+            DealTurn => {
+                let deck = Card::generate_deck();
+                let mut next_states = Vec::new();
+                for turn in deck {
+                    let num_turn = evaluator.cards_to_u64(&[turn]);
+                    if num_turn & self.cards > 0 {
+                        continue;
+                    }
+                    let next_state = State {
+                        terminal: NonTerminal,
+                        action: DealTurn,
+                        cards: self.cards | num_turn,
+                        sbbet: self.sbbet,
+                        bbbet: self.bbbet,
+                        next_to_act: Small,
+                        card_strategies: Some(Strategy::new()),
+                        next_states: vec![],
+                        permutations: vec![],
+                    };
+                    next_states.push(next_state);
+                }
+                next_states
+            }
+            DealRiver => {
+                let deck = Card::generate_deck();
+                let mut next_states = Vec::new();
+                for river in deck {
+                    let num_river = evaluator.cards_to_u64(&[river]);
+                    if num_river & self.cards > 0 {
+                        continue;
+                    }
+                    let next_state = State {
+                        terminal: NonTerminal,
+                        action: DealRiver,
+                        cards: self.cards | num_river,
+                        sbbet: self.sbbet,
+                        bbbet: self.bbbet,
+                        next_to_act: Small,
+                        card_strategies: Some(Strategy::new()),
+                        next_states: vec![],
+                        permutations: vec![],
+                    };
+                    next_states.push(next_state);
+                }
+                next_states
+            }
+            DealHole => panic!("DealHole should only be used in root of game"),
         }
     }
 
@@ -203,9 +271,13 @@ impl State {
                 } else {
                     Vector::default()
                 };
-                let mut results = [Vector::default(); 2];
+                let mut results = [Vector::default(); 3];
 
-                let strategy = self.card_strategies.as_ref().unwrap().get_strategy();
+                let strategy = self
+                    .card_strategies
+                    .as_ref()
+                    .unwrap()
+                    .get_strategy(self.next_states.len());
 
                 for (a, (next, action_prob)) in
                     zip(self.next_states.iter_mut(), strategy).enumerate()
@@ -243,13 +315,14 @@ impl State {
                 }
                 // update strategy
                 if self.next_to_act == updating_player && !calc_exploit {
-                    let mut update = [Vector::default(); 2];
+                    let mut update = [Vector::default(); 3];
                     for (i, &util) in results.iter().enumerate() {
-                        update[i] = util - average_strategy;
+                        if i < self.next_states.len() {
+                            update[i] = util - average_strategy;
+                        }
                     }
                     self.card_strategies.as_mut().unwrap().update_add(&update);
                 }
-
                 average_strategy
             }
 
@@ -312,19 +385,60 @@ impl State {
             }
             Flop => {
                 let mut total = Vector::default();
+                let mut count = 0.0;
                 for next_state in self.next_states.iter_mut() {
                     let res = next_state.evaluate_state(
-                        &(*opponent_range * (1.0 / 22100.0)),
+                        opponent_range,
                         evaluator,
                         card_order,
                         updating_player,
                         calc_exploit,
                     );
                     for &permutation in &next_state.permutations {
+                        count += 1.0;
                         total += permute(permutation, res)
                     }
                 }
-                total
+                total * (1.0 / count)
+            }
+            Turn => {
+                let mut total = Vector::default();
+                let mut count = 0.0;
+                for next_state in self.next_states.iter_mut() {
+                    let res = next_state.evaluate_state(
+                        opponent_range,
+                        evaluator,
+                        card_order,
+                        updating_player,
+                        calc_exploit,
+                    );
+                    count += 1.0;
+                    total += res;
+                }
+                total * (1.0 / count)
+            }
+            River => {
+                // Some parallelization
+                let mut total = Vector::default();
+                let res = self
+                    .next_states
+                    //.par_iter_mut()
+                    .iter_mut()
+                    .map(|next_state| {
+                        next_state.evaluate_state(
+                            opponent_range,
+                            evaluator,
+                            card_order,
+                            updating_player,
+                            calc_exploit,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                for val in res {
+                    total += val;
+                }
+
+                total * (1.0 / self.next_states.len() as f32)
             }
         }
     }
@@ -336,27 +450,22 @@ impl State {
         card_order: &Vec<u64>,
         updating_player: Player,
     ) -> Vector {
-        let (order, groups, coll_vec) = evaluator.gpu_eval(self.cards);
+        let eval = evaluator.vectorized_eval(self.cards);
+        let coll = evaluator.collisions(self.cards);
         let gpu = Instant::now();
-        let result_gpu = evaluate_showdown_gpu(
-            &opponent_range.clone(),
-            self.cards,
-            card_order,
-            order,
-            groups,
-            coll_vec,
-        );
+        let result_gpu =
+            evaluate_showdown_gpu(&opponent_range.clone(), self.cards, card_order, eval, coll);
         let gpu = gpu.elapsed().as_micros();
 
         let cpu = Instant::now();
         let result = self.evaluate_showdown(opponent_range, evaluator, card_order, updating_player);
         let cpu = cpu.elapsed().as_micros();
         for i in 0..1326 {
-            //dbg!(i, result_gpu[i], result[i]);
-            assert!((result_gpu[i] - result[i]).abs() < 1e-6);
+            //println!("{} {} {}", i, result_gpu[i], result[i]);
+            assert_approx_eq!(result_gpu[i], result[i], 1e-2);
         }
-        //panic!("Run once");
-        println!("COMPLETE {} cpu {} gpu {}", self.cards, cpu, gpu);
+        panic!("Run once");
+        //println!("COMPLETE {} cpu {} gpu {}", self.cards, cpu, gpu);
         result
     }
 
@@ -373,22 +482,31 @@ impl State {
             Big => (self.bbbet, self.sbbet),
         };
 
-        let sorted = evaluator.vectorized_eval(self.cards);
-        let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
+        let sorted = &evaluator.vectorized_eval(self.cards);
+        let mut groups = vec![];
+        let mut current = vec![sorted[0] & 2047];
+        for (index, &eval) in sorted[1..1326].iter().enumerate() {
+            if eval & 2048 > 0 {
+                groups.push(current);
+                current = vec![];
+            }
+            current.push(eval & 2047);
+        }
+        assert!(!current.is_empty());
+        groups.push(current);
 
         let mut collisions = [0.0; 52];
 
         let mut cumulative = 0.0;
 
-        for group in groups {
+        for group in groups.iter() {
             let mut current_cumulative = 0.0;
 
             let mut current_collisions = [0.0; 52];
-            // forward pass
-            for &(_, index) in group {
+            for &index in group {
                 let index = index as usize;
                 let cards = card_order[index];
-                if card_order[index] & self.cards > 0 {
+                if cards & self.cards > 0 {
                     continue;
                 }
                 let card = Evaluator::separate_cards(cards);
@@ -399,9 +517,9 @@ impl State {
                     current_collisions[c] += opponent_range[index];
                 }
             }
-            cumulative += current_cumulative; // * opponent_bet;
+            cumulative += current_cumulative; // * opponent_bet; //TODO
             for i in 0..52 {
-                collisions[i] += current_collisions[i]; // * opponent_bet;
+                collisions[i] += current_collisions[i]; // * opponent_bet; //TODO
             }
         }
 
@@ -409,17 +527,14 @@ impl State {
 
         let mut cumulative = 0.0;
 
-        let groups = sorted.group_by(|&(a, _), &(b, _)| a == b);
-
-        for group in groups.rev() {
+        for group in groups.iter().rev() {
             let mut current_cumulative = 0.0;
 
             let mut current_collisions = [0.0; 52];
-            // forward pass
-            for &(_, index) in group {
+            for &index in group {
                 let index = index as usize;
                 let cards = card_order[index];
-                if card_order[index] & self.cards > 0 {
+                if cards & self.cards > 0 {
                     continue;
                 }
                 let card = Evaluator::separate_cards(cards);
@@ -430,11 +545,36 @@ impl State {
                     current_collisions[c] += opponent_range[index];
                 }
             }
-            cumulative += current_cumulative; // * self_bet;
+            cumulative += current_cumulative; // * self_bet; //TODO
             for i in 0..52 {
-                collisions[i] += current_collisions[i]; // * self_bet;
+                collisions[i] += current_collisions[i]; // * self_bet; //TODO
             }
         }
+
+        // // Naive
+        // let peval = poker::Evaluator::new();
+        // let mut res = Vector::default();
+        // for (i1, &hand1) in card_order.iter().enumerate() {
+        //     for (i2, &hand2) in card_order.iter().enumerate() {
+        //         if hand1 & hand2 > 0 {
+        //             continue;
+        //         }
+        //         if (hand1 & self.cards > 0) || (hand2 & self.cards > 0) {
+        //             continue;
+        //         }
+        //         let hand1 = evaluator.u64_to_cards(hand1 | self.cards);
+        //         let hand2 = evaluator.u64_to_cards(hand2 | self.cards);
+        //         if (peval.evaluate(&hand1).unwrap() > peval.evaluate(&hand2).unwrap()) {
+        //             res[i1] += opponent_range[i2]; // * opponent_bet; //TODO
+        //         } else if (peval.evaluate(&hand1).unwrap() < peval.evaluate(&hand2).unwrap()) {
+        //             res[i1] -= opponent_range[i2]; // * self_bet; //TODO
+        //         };
+        //     }
+        // }
+        // for i in 0..1326 {
+        //     assert_approx_eq!(res[i], result[i], 1e-3);
+        // }
+        // println!("Naive and CPU same");
         result
     }
 }

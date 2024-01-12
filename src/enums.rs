@@ -10,7 +10,10 @@ pub(crate) enum Action {
     Check,
     Call,
     Raise,
-    Deal,
+    DealHole,
+    DealFlop,
+    DealTurn,
+    DealRiver,
 }
 
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
@@ -20,4 +23,6 @@ pub(crate) enum TerminalState {
     BBWins,
     Showdown,
     Flop,
+    Turn,
+    River,
 }

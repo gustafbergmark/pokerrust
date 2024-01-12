@@ -8,4 +8,5 @@ fn main() {
         .flag("arch=compute_89,code=sm_89")
         .file("src/cuda/poker.cu")
         .compile("poker");
+    println!("cargo:rerun-if-changed=src/cuda/poker.cu");
 }

@@ -1,128 +1,186 @@
+use crate::combination_map::CombinationMap;
 use itertools::Itertools;
-use poker::Card;
+use poker::{box_cards, Card};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json_any_key::*;
 use std::collections::HashMap;
-use std::fs;
+use std::env::current_dir;
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Evaluator {
-    #[serde(with = "any_key_map")]
-    vectorized_eval: HashMap<u64, Vec<(u16, u16)>>,
-    #[serde(with = "any_key_map")]
-    gpu_eval: HashMap<u64, (Vec<u16>, Vec<u16>, Vec<u16>)>,
-    #[serde(with = "any_key_map")]
+#[derive(Debug)]
+pub struct Evaluator<'a> {
+    // First 1326 are card orders, rest 128 is start group indexes for each gpu thread
+    vectorized_eval: CombinationMap<Vec<u16>, 52, 5>,
+    collisions: CombinationMap<Vec<u16>, 52, 5>,
+    gpu_eval: CombinationMap<CombinationMap<(&'a Vec<u16>, &'a Vec<u16>), 52, 2>, 52, 3>,
     card_nums: HashMap<Card, u64>,
+    num_cards: HashMap<u64, Card>,
 }
 #[allow(unused)]
-impl Evaluator {
+impl Evaluator<'_> {
     pub fn new(card_order: &Vec<[Card; 2]>) -> Self {
-        match fs::read_to_string("./files/evaluator.json") {
-            Ok(eval_json) => serde_json::from_str(&eval_json).unwrap(),
+        let mut card_nums = HashMap::new();
+        let mut num_cards = HashMap::new();
+        for (i, card) in Card::generate_deck().enumerate() {
+            card_nums.insert(card, 1 << i);
+            num_cards.insert(1 << i, card);
+        }
+        let (vectorized_eval, collisions) = match std::fs::read("./files/eval_small.bin") {
+            Ok(eval) => bincode::deserialize(&eval).expect("Failed to deserialize"),
             Err(_) => {
                 let evaluator = poker::Evaluator::new();
-                let deck = Card::generate_deck();
-                let mut card_nums = HashMap::new();
-                for (i, card) in Card::generate_deck().enumerate() {
-                    card_nums.insert(card, 1 << i);
-                }
+                // For full game
+                //let deck = Card::generate_deck();
 
-                let mut hands = Vec::new();
-                for hand in deck.combinations(5) {
-                    let mut num_hand = 0;
-                    for &card in &hand {
-                        num_hand |= card_nums.get(&card).unwrap();
-                    }
-                    hands.push((evaluator.evaluate(hand).unwrap(), num_hand));
-                }
-                hands.sort();
+                // For fixed flop game
+                let deck = Card::generate_deck().collect::<Vec<_>>();
+                let fixed_flop = &deck[..3];
+                let deck = deck[3..].to_vec().into_iter();
 
-                let mut count: u16 = 0;
-                let mut evals = HashMap::new();
-                let mut prev_hand = hands[0].0;
-                for (eval, num) in hands {
-                    if eval > prev_hand {
-                        count += 1;
-                        prev_hand = eval;
-                    }
-                    evals.insert(num, count);
-                }
-
-                let card_order: Vec<u64> = card_order
+                // create card_order as u64
+                let card_order_num: Vec<u64> = card_order
+                    .clone()
                     .iter()
                     .map(|cards| {
                         card_nums.get(&cards[0]).unwrap() | card_nums.get(&cards[1]).unwrap()
                     })
                     .collect();
 
-                let deck = Card::generate_deck();
-                let mut vectorized_flop = Vec::new();
-                let mut gpu_flop = Vec::new();
-                for flop in deck.combinations(3) {
-                    let mut num_hand = 0;
-                    for &card in &flop {
-                        num_hand |= card_nums.get(&card).unwrap();
-                    }
-                    // calculate vectorized_eval
-                    let sorted: Vec<(u16, u16)> = card_order
-                        .clone()
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, elem)| (*evals.get(&(elem | num_hand)).unwrap_or(&0), i as u16))
-                        .sorted() // could be done quicker, saves max 1 sec
-                        .collect();
-                    vectorized_flop.push((num_hand, sorted.clone()));
-
-                    // Calculate GPU eval
-                    let groups_calc = sorted.group_by(|&(a, _), &(b, _)| a == b);
-                    let mut groups = vec![0];
-                    let mut prefix = 0;
-                    for g in groups_calc {
-                        prefix += g.len();
-                        groups.push(prefix as u16);
-                    }
-                    let order = sorted.iter().map(|e| e.1).collect::<Vec<_>>();
-
-                    let mut coll_vec = vec![vec![]; 52];
-                    for (i, &sorted_index) in order.iter().enumerate() {
-                        let hand = card_order[sorted_index as usize];
-                        let cards = Evaluator::separate_cards(hand);
-                        for c in cards {
-                            coll_vec[c].push(i as u16);
+                let result = deck
+                    //.combinations(5) // Full game
+                    .combinations(2) // Fixed Flop
+                    .par_bridge()
+                    .into_par_iter()
+                    .map(|hand| {
+                        let hand = box_cards!(hand, fixed_flop); // Fixed Flop
+                        let num_hand = Self::cards_to_u64_inner(&hand, &card_nums);
+                        let mut result: Vec<u16> = vec![0; 1326 + 128 * 2];
+                        let mut coll_vec = vec![0; 52 * 51];
+                        let mut evals = vec![];
+                        for (i, cards) in card_order.iter().enumerate() {
+                            let num_cards = Self::cards_to_u64_inner(cards, &card_nums);
+                            if num_hand & num_cards > 0 {
+                                evals.push((poker::Eval::WORST, i));
+                            } else {
+                                let combined = box_cards!(cards, hand);
+                                evals.push((
+                                    evaluator.evaluate(combined).expect("Failed to evaluate"),
+                                    i,
+                                ));
+                            }
                         }
-                    }
-                    let coll_vec = coll_vec.into_iter().flatten().collect::<Vec<_>>();
+                        evals.sort();
+                        let mut prev_eval = poker::Eval::WORST;
+                        let mut last_group = 0;
+                        for (sorted_index, &(eval, mut index)) in evals.iter().enumerate() {
+                            if eval > prev_eval || sorted_index == 0 {
+                                prev_eval = eval;
+                                last_group = sorted_index;
+                                // 2048 bit set indicates start of new group
+                                index |= 2048;
+                            }
+                            if sorted_index % 11 == 0 {
+                                result[1326 + sorted_index / 11] = last_group as u16;
+                            }
+                            result[sorted_index] = index as u16;
+                        }
+                        // do next group for last element as well:
+                        let mut next_group = 1326;
+                        let mut prev_eval = poker::Eval::BEST;
+                        for (sorted_index, (eval, index)) in evals.into_iter().enumerate().rev() {
+                            if eval < prev_eval {
+                                prev_eval = eval;
+                                next_group = sorted_index + 1;
+                            }
+                            if (sorted_index % 11 == 10) || (sorted_index == 1325) {
+                                result[1326 + 128 + sorted_index / 11] = next_group as u16;
+                            }
+                        }
+                        // Calculate collisions for GPU
+                        let mut indexes = [0; 52];
+                        let mut card_group = [0; 52];
+                        let mut current_group = 0;
+                        for (i, &sorted_index) in result[..1326].iter().enumerate() {
+                            if sorted_index & 2048 > 0 {
+                                current_group += 1;
+                            }
+                            let sorted_index = sorted_index & 2047;
+                            let hand = card_order_num[sorted_index as usize];
+                            let cards = Self::separate_cards(hand);
+                            for c in cards {
+                                let mut val = i as u16;
+                                // Include new group information in 2048 bit
+                                if current_group > card_group[c] {
+                                    card_group[c] = current_group;
+                                    val |= 2048;
+                                }
+                                let index = indexes[c];
+                                indexes[c] += 1;
+                                coll_vec[c * 51 + index] = val;
+                            }
+                        }
 
-                    gpu_flop.push((num_hand, (order, groups, coll_vec)))
+                        (num_hand, result, coll_vec)
+                    })
+                    .collect::<Vec<_>>();
+
+                let mut order_map: CombinationMap<Vec<u16>, 52, 5> = CombinationMap::new();
+                let mut collision_map: CombinationMap<Vec<u16>, 52, 5> = CombinationMap::new();
+                for (key, order, collisions) in result {
+                    order_map.insert(key, order);
+                    collision_map.insert(key, collisions);
                 }
-
-                let eval = Evaluator {
-                    card_nums,
-                    vectorized_eval: vectorized_flop.into_iter().collect(),
-                    gpu_eval: gpu_flop.into_iter().collect(),
-                };
-                let serialized = serde_json::to_string(&eval).unwrap();
-                match fs::write("./files/evaluator.json", serialized) {
-                    Ok(_) => (),
+                let result = (order_map, collision_map);
+                match std::fs::write(
+                    "./files/eval_small.bin",
+                    bincode::serialize(&result).expect("Failed to serialize"),
+                ) {
+                    Ok(_) => println!("Created vectorized_eval"),
                     Err(e) => panic!("{}", e),
                 }
-                eval
+                result
             }
+        };
+
+        Evaluator {
+            vectorized_eval,
+            collisions,
+            gpu_eval: CombinationMap::new(),
+            card_nums,
+            num_cards,
         }
     }
 
-    pub fn vectorized_eval(&self, cards: u64) -> &Vec<(u16, u16)> {
-        self.vectorized_eval.get(&cards).unwrap()
+    pub fn vectorized_eval(&self, communal_cards: u64) -> &Vec<u16> {
+        self.vectorized_eval.get(communal_cards).unwrap()
     }
 
-    pub fn gpu_eval(&self, cards: u64) -> &(Vec<u16>, Vec<u16>, Vec<u16>) {
-        self.gpu_eval.get(&cards).unwrap()
+    pub fn collisions(&self, communal_cards: u64) -> &Vec<u16> {
+        self.collisions.get(communal_cards).unwrap()
+    }
+
+    pub fn gpu_eval(&self, communal_cards: u64) -> &Vec<u16> {
+        self.vectorized_eval.get(communal_cards).unwrap()
     }
 
     pub fn cards_to_u64(&self, cards: &[Card]) -> u64 {
+        Self::cards_to_u64_inner(cards, &self.card_nums)
+    }
+
+    pub fn u64_to_cards(&self, cards: u64) -> Vec<Card> {
+        let mut res = Vec::new();
+        for i in 0..52 {
+            if (1 << i) & cards > 0 {
+                res.push(self.num_cards.get(&(1 << i)).unwrap().clone())
+            }
+        }
+        res
+    }
+
+    fn cards_to_u64_inner(cards: &[Card], card_nums: &HashMap<Card, u64>) -> u64 {
         let mut res = 0;
         for card in cards {
-            res |= self.card_nums.get(card).expect("Non-existent card");
+            res |= card_nums.get(card).expect("Non-existent card");
         }
         res
     }

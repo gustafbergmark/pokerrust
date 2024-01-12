@@ -142,11 +142,6 @@ impl DivAssign for Vector {
         for i in 0..1326 {
             self.values[i] /= rhs.values[i];
         }
-        for i in 0..1326 {
-            if self.values[i].is_nan() {
-                self.values[i] = 0.5;
-            }
-        }
     }
 }
 impl Div<f32> for Vector {
