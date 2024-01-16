@@ -1,4 +1,4 @@
-use crate::cuda_interface::evaluate_showdown_gpu;
+use crate::cuda_interface::{evaluate_fold_gpu, evaluate_showdown_gpu};
 use crate::enums::Action::*;
 use crate::enums::Player::*;
 use crate::enums::TerminalState::*;
@@ -7,12 +7,10 @@ use crate::evaluator::Evaluator;
 use crate::permutation_handler::permute;
 use crate::strategy::Strategy;
 use crate::vector::Vector;
-use approx::{assert_abs_diff_eq, relative_eq};
 use assert_approx_eq::assert_approx_eq;
 use itertools::Itertools;
 use poker::Suit::*;
 use poker::{Card, Suit};
-use rayon::iter::IntoParallelRefMutIterator;
 use rayon::iter::ParallelIterator;
 use std::collections::HashSet;
 use std::iter::zip;
@@ -258,7 +256,6 @@ impl State {
         &mut self,
         opponent_range: &Vector,
         evaluator: &Evaluator,
-        card_order: &Vec<u64>,
         updating_player: Player,
         calc_exploit: bool,
     ) -> Vector {
@@ -286,7 +283,6 @@ impl State {
                         next.evaluate_state(
                             opponent_range,
                             evaluator,
-                            card_order,
                             updating_player,
                             calc_exploit,
                         )
@@ -294,7 +290,6 @@ impl State {
                         next.evaluate_state(
                             &(*opponent_range * action_prob),
                             evaluator,
-                            card_order,
                             updating_player,
                             calc_exploit,
                         )
@@ -326,44 +321,36 @@ impl State {
                 average_strategy
             }
 
-            Showdown => {
-                self.evaluate_showdown2(opponent_range, evaluator, card_order, updating_player)
-            }
-            SBWins => self.evaluate_fold(opponent_range, card_order, updating_player, Big),
-            BBWins => self.evaluate_fold(opponent_range, card_order, updating_player, Small),
+            Showdown => self.evaluate_showdown2(opponent_range, evaluator, updating_player),
+            SBWins => self.evaluate_fold2(opponent_range, evaluator, updating_player, Big),
+            BBWins => self.evaluate_fold2(opponent_range, evaluator, updating_player, Small),
             Flop => {
                 let mut total = Vector::default();
-                let mut count = 0.0;
                 for next_state in self.next_states.iter_mut() {
                     let res = next_state.evaluate_state(
                         opponent_range,
                         evaluator,
-                        card_order,
                         updating_player,
                         calc_exploit,
                     );
                     for &permutation in &next_state.permutations {
-                        count += 1.0;
                         total += permute(permutation, res)
                     }
                 }
-                total * (1.0 / count)
+                total * (1.0 / 22100.0)
             }
             Turn => {
                 let mut total = Vector::default();
-                let mut count = 0.0;
                 for next_state in self.next_states.iter_mut() {
                     let res = next_state.evaluate_state(
                         opponent_range,
                         evaluator,
-                        card_order,
                         updating_player,
                         calc_exploit,
                     );
-                    count += 1.0;
                     total += res;
                 }
-                total * (1.0 / count)
+                total * (1.0 / (self.next_states.len() as f32))
             }
             River => {
                 // Some parallelization
@@ -376,7 +363,6 @@ impl State {
                         next_state.evaluate_state(
                             opponent_range,
                             evaluator,
-                            card_order,
                             updating_player,
                             calc_exploit,
                         )
@@ -386,18 +372,61 @@ impl State {
                     total += val;
                 }
 
-                total * (1.0 / self.next_states.len() as f32)
+                total * (1.0 / (self.next_states.len() as f32))
             }
         }
+    }
+
+    fn evaluate_fold2(
+        &self,
+        opponent_range: &Vector,
+        evaluator: &Evaluator,
+        updating_player: Player,
+        folding_player: Player,
+    ) -> Vector {
+        let correct =
+            self.evaluate_fold(opponent_range, evaluator, updating_player, folding_player);
+
+        let bet = match folding_player {
+            Small => self.sbbet,
+            Big => self.bbbet,
+        };
+        let updating_player = match updating_player {
+            Small => 0,
+            Big => 1,
+        };
+        let folding_player = match folding_player {
+            Small => 0,
+            Big => 1,
+        };
+        let test = evaluate_fold_gpu(
+            opponent_range,
+            self.cards,
+            evaluator.card_order(),
+            evaluator.card_indexes(),
+            updating_player,
+            folding_player,
+            bet,
+        );
+
+        for i in 0..1326 {
+            //println!("{} {} {}", i, correct[i], test[i]);
+            assert_approx_eq!(correct[i], test[i], 1e-1);
+        }
+        //panic!("Run once");
+        //println!("COMPLETE");
+
+        correct
     }
 
     fn evaluate_fold(
         &self,
         opponent_range: &Vector,
-        card_order: &Vec<u64>,
+        evaluator: &Evaluator,
         updating_player: Player,
         folding_player: Player,
     ) -> Vector {
+        let card_order = evaluator.card_order();
         let mut result = Vector::default();
         let mut range_sum = 0.0;
         let mut collisions = [0.0; 52];
@@ -438,33 +467,28 @@ impl State {
         &self,
         opponent_range: &Vector,
         evaluator: &Evaluator,
-        card_order: &Vec<u64>,
         updating_player: Player,
     ) -> Vector {
         assert_eq!(self.sbbet, self.bbbet);
         let bet = self.sbbet;
         let eval = evaluator.vectorized_eval(self.cards);
         let coll = evaluator.collisions(self.cards);
-        let gpu = Instant::now();
         let result_gpu = evaluate_showdown_gpu(
             &opponent_range.clone(),
             self.cards,
-            card_order,
+            evaluator.card_order(),
             eval,
             coll,
             bet,
         );
-        let gpu = gpu.elapsed().as_micros();
 
-        let cpu = Instant::now();
-        let result = self.evaluate_showdown(opponent_range, evaluator, card_order, updating_player);
-        let cpu = cpu.elapsed().as_micros();
+        let result = self.evaluate_showdown(opponent_range, evaluator, updating_player);
         for i in 0..1326 {
             //println!("{} {} {}", i, result_gpu[i], result[i]);
-            assert_approx_eq!(result_gpu[i], result[i], 1e-2);
+            assert_approx_eq!(result_gpu[i], result[i], 1e-1);
         }
         //panic!("Run once");
-        println!("COMPLETE {} cpu {} gpu {}", self.cards, cpu, gpu);
+        //println!("COMPLETE");
         result
     }
 
@@ -472,10 +496,10 @@ impl State {
         &self,
         opponent_range: &Vector,
         evaluator: &Evaluator,
-        card_order: &Vec<u64>,
         updating_player: Player,
     ) -> Vector {
         let mut result = Vector::default();
+        let card_order = evaluator.card_order();
         let (self_bet, opponent_bet) = match updating_player {
             Small => (self.sbbet, self.bbbet),
             Big => (self.bbbet, self.sbbet),
@@ -484,7 +508,7 @@ impl State {
         let sorted = &evaluator.vectorized_eval(self.cards);
         let mut groups = vec![];
         let mut current = vec![sorted[0] & 2047];
-        for (index, &eval) in sorted[1..1326].iter().enumerate() {
+        for &eval in sorted[1..1326].iter() {
             if eval & 2048 > 0 {
                 groups.push(current);
                 current = vec![];

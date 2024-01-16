@@ -198,6 +198,67 @@ evaluate_showdown_kernel(float *opponent_range, long communal_cards, long *card_
     __syncthreads();
 }
 
+__global__ void
+evaluate_fold_kernel(float *opponent_range, long communal_cards, long *card_order, short *card_indexes,
+                     short updating_player, short folding_player, float bet, float *result) {
+    // Setup
+    __shared__ float range_sum[1326];
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    for (int b = 0; b < 11; b++) {
+        int index = i * 11 + b;
+        if (index < 1326) {
+            // reset values
+            range_sum[index] = 0;
+            // Because of inclusion-exclusion, we need to add the
+            // probability that the opponent got exactly the same hand
+            result[index] = 0;
+            // Impossible hand since overlap with communal cards
+            if (communal_cards & card_order[index]) continue;
+            range_sum[index] = opponent_range[index];
+            result[index] = opponent_range[index];
+        }
+    }
+    __syncthreads();
+
+    // Calculate prefix sum
+    cuda_prefix_sum(range_sum);
+
+    __syncthreads();
+    // using result[1325] is a bit hacky, but correct
+    float total = range_sum[1325] + result[1325];
+
+    if (i < 52) {
+        float card_sum = 0.0;
+        for (int c = 0; c < 51; c++) {
+            short index = card_indexes[i * 51 + c];
+            long temp = card_order[index];
+            if (communal_cards & card_order[index]) continue;
+            card_sum += opponent_range[index];
+        }
+        for (int c = 0; c < 51; c++) {
+            short index = card_indexes[i * 51 + c];
+            if (communal_cards & card_order[index]) continue;
+            atomicAdd(&result[index], -card_sum);
+        }
+    }
+    __syncthreads();
+
+    for (int b = 0; b < 11; b++) {
+        int index = i * 11 + b;
+        if (index < 1326) {
+            if (communal_cards & card_order[index]) continue;
+            result[index] += total;
+            if (updating_player == folding_player) {
+                result[index] *= -bet;
+            } else {
+                result[index] *= bet;
+            }
+        }
+    }
+    __syncthreads();
+}
+
 
 extern "C" {
 void prefix_sum_cuda(float *v) {
@@ -239,7 +300,8 @@ void evaluate_showdown_cuda(float *opponent_range, long communal_cards, long *ca
                                          device_coll_vec, bet, device_result);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess)
-        printf("Error: %s\n", cudaGetErrorString(err));    cudaDeviceSynchronize();
+        printf("Error: %s\n", cudaGetErrorString(err));
+    cudaDeviceSynchronize();
     cudaMemcpy(result, device_result, 1326 * sizeof(float), cudaMemcpyDeviceToHost);
 
     cudaFree(device_opponent_range);
@@ -247,6 +309,44 @@ void evaluate_showdown_cuda(float *opponent_range, long communal_cards, long *ca
     cudaFree(device_card_order);
     cudaFree(device_eval);
     cudaFree(device_coll_vec);
+}
+
+void evaluate_fold_cuda(float *opponent_range, long communal_cards, long *card_order, short *card_indexes,
+                        short updating_player,
+                        short folding_player, float bet, float *result) {
+    float *device_opponent_range;
+    cudaMalloc(&device_opponent_range, 1326 * sizeof(float));
+    cudaMemcpy(device_opponent_range, opponent_range, 1326 * sizeof(float), cudaMemcpyHostToDevice);
+
+    float *device_result;
+    cudaMalloc(&device_result, 1326 * sizeof(float));
+
+    long *device_card_order;
+    cudaMalloc(&device_card_order, 1326 * sizeof(long));
+    cudaMemcpy(device_card_order, card_order, 1326 * sizeof(long), cudaMemcpyHostToDevice);
+    cudaError_t err2 = cudaGetLastError();
+    if (err2 != cudaSuccess)
+        printf("Error: %s\n", cudaGetErrorString(err2));
+
+    short *device_card_indexes;
+    cudaMalloc(&device_card_indexes, 52 * 51 * sizeof(short));
+    cudaMemcpy(device_card_indexes, card_indexes, 52 * 51 * sizeof(short), cudaMemcpyHostToDevice);
+
+    evaluate_fold_kernel<<<1, 128>>>(device_opponent_range, communal_cards, device_card_order, device_card_indexes,
+                                     updating_player,
+                                     folding_player, bet, device_result);
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess)
+        printf("Error: %s\n", cudaGetErrorString(err));
+
+    cudaDeviceSynchronize();
+    cudaMemcpy(result, device_result, 1326 * sizeof(float), cudaMemcpyDeviceToHost);
+
+    cudaFree(device_opponent_range);
+    cudaFree(device_result);
+    cudaFree(device_card_order);
+    cudaFree(device_card_indexes);
 }
 }
 

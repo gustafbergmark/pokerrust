@@ -3,13 +3,14 @@ use itertools::Itertools;
 use poker::{box_cards, Card};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use serde_json_any_key::*;
 use std::collections::HashMap;
-use std::env::current_dir;
 
 #[derive(Debug)]
 pub struct Evaluator<'a> {
-    // First 1326 are card orders, rest 128 is start group indexes for each gpu thread
+    // First 1326 are card orders, following 128 is start group indexes
+    // for each gpu thread and last 128 is end next group index for each gpu thread
+    card_order: Vec<u64>,
+    card_indexes: Vec<u16>,
     vectorized_eval: CombinationMap<Vec<u16>, 52, 5>,
     collisions: CombinationMap<Vec<u16>, 52, 5>,
     gpu_eval: CombinationMap<CombinationMap<(&'a Vec<u16>, &'a Vec<u16>), 52, 2>, 52, 3>,
@@ -18,7 +19,7 @@ pub struct Evaluator<'a> {
 }
 #[allow(unused)]
 impl Evaluator<'_> {
-    pub fn new(card_order: &Vec<[Card; 2]>) -> Self {
+    pub fn new(card_order: Vec<[Card; 2]>) -> Self {
         let mut card_nums = HashMap::new();
         let mut num_cards = HashMap::new();
         for (i, card) in Card::generate_deck().enumerate() {
@@ -142,7 +143,29 @@ impl Evaluator<'_> {
             }
         };
 
+        let card_order: Vec<_> = card_order
+            .iter()
+            .map(|hand| Evaluator::cards_to_u64_inner(hand, &card_nums))
+            .collect();
+
+        let mut card_indexes_builder = vec![vec![]; 52];
+        for (i, cards) in card_order.iter().enumerate() {
+            for card in Evaluator::separate_cards(*cards) {
+                card_indexes_builder[card].push(i as u16);
+            }
+        }
+        let mut card_indexes = vec![];
+        for i in 0..52 {
+            assert_eq!(card_indexes_builder[i].len(), 51);
+            for j in 0..51 {
+                card_indexes.push(card_indexes_builder[i][j]);
+            }
+        }
+        assert_eq!(card_indexes.len(), 51 * 52);
+
         Evaluator {
+            card_order,
+            card_indexes,
             vectorized_eval,
             collisions,
             gpu_eval: CombinationMap::new(),
@@ -151,6 +174,13 @@ impl Evaluator<'_> {
         }
     }
 
+    pub fn card_order(&self) -> &Vec<u64> {
+        &self.card_order
+    }
+
+    pub fn card_indexes(&self) -> &Vec<u16> {
+        &self.card_indexes
+    }
     pub fn vectorized_eval(&self, communal_cards: u64) -> &Vec<u16> {
         self.vectorized_eval.get(communal_cards).unwrap()
     }

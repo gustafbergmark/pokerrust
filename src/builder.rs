@@ -19,7 +19,7 @@ pub(crate) fn fixed_flop_poker() -> Game<'static> {
     card_order.sort();
     let mut root = State::new(NonTerminal, DealHole, 0.5, 1.0, Small);
     let start = Instant::now();
-    let evaluator = Evaluator::new(&card_order);
+    let evaluator = Evaluator::new(card_order);
     println!(
         "Evaluator created in {} seconds",
         start.elapsed().as_secs_f32()
@@ -28,7 +28,7 @@ pub(crate) fn fixed_flop_poker() -> Game<'static> {
     let _states = build(&mut root, &evaluator, 0);
     //dbg!(_states);
     println!("Game created in {} seconds", start.elapsed().as_secs_f32());
-    Game::new(root, evaluator, card_order)
+    Game::new(root, evaluator)
 }
 
 fn build(state: &mut State, evaluator: &Evaluator, raises: u8) -> usize {
