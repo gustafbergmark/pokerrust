@@ -29,29 +29,6 @@ __device__ void p_sum(float *input, int i) {
     __syncthreads();
 }
 
-__global__ void gpu_prefix_sum(float *input) {
-    __shared__ float temp[128];
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    temp[i] = 0;
-    for (int b = 0; b < 11; b++) {
-        if (i * 11 + b < 1326 && i < 127) {
-            temp[i] += input[i * 11 + b];
-        }
-    }
-
-    __syncthreads();
-    p_sum(temp, i);
-
-    float prefix = temp[i];
-    for (int b = 0; b < 11; b++) {
-        if (i * 11 + b < 1326) {
-            float temp = input[i * 11 + b];
-            input[i * 11 + b] = prefix;
-            prefix += temp;
-        }
-    }
-}
-
 __device__ void cuda_prefix_sum(float *input) {
     __shared__ float temp[128];
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -261,20 +238,6 @@ evaluate_fold_kernel(float *opponent_range, long communal_cards, long *card_orde
 
 
 extern "C" {
-void prefix_sum_cuda(float *v) {
-    size_t input_size = 1326 * sizeof(float);
-    float *deviceInput;
-    cudaMalloc(&deviceInput, input_size);
-    cudaMemcpy(deviceInput, v, input_size, cudaMemcpyHostToDevice);
-    gpu_prefix_sum<<<1, 128>>>(deviceInput);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess)
-        printf("Error: %s\n", cudaGetErrorString(err));
-    cudaDeviceSynchronize();
-    cudaMemcpy(v, deviceInput, input_size, cudaMemcpyDeviceToHost);
-    cudaFree(deviceInput);
-}
-
 void evaluate_showdown_cuda(float *opponent_range, long communal_cards, long *card_order, short *eval,
                             short *coll_vec, float bet, float *result) {
     float *device_opponent_range;
@@ -349,16 +312,3 @@ void evaluate_fold_cuda(float *opponent_range, long communal_cards, long *card_o
     cudaFree(device_card_indexes);
 }
 }
-
-
-//int main(int argc, char **argv) {
-//    size_t input_size = 1326*sizeof(float);
-//    float* input = (float*) malloc(input_size);
-//    for(int i = 0; i < 1326; i++) {
-//        input[i] = 1.0;
-//    }
-//    prefix_sum_cuda(input);
-//    for(int i = 0; i < 1326; i++) {
-//        printf("%d %f\n", i, input[i]);
-//    }
-//}

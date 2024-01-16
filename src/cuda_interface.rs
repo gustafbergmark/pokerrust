@@ -1,6 +1,5 @@
 use crate::vector::Vector;
 extern "C" {
-    fn prefix_sum_cuda(v: *mut f32);
     fn evaluate_showdown_cuda(
         opponent_range: *const f32,
         communal_cards: u64,
@@ -21,10 +20,6 @@ extern "C" {
         bet: f32,
         result: *mut f32,
     );
-}
-
-pub fn prefix_sum(v: &mut Vector) {
-    unsafe { prefix_sum_cuda(v.values.as_mut_ptr()) }
 }
 
 pub fn evaluate_showdown_gpu(
