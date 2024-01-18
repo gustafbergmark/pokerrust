@@ -14,15 +14,14 @@ use poker::{Card, Suit};
 use rayon::iter::ParallelIterator;
 use std::collections::HashSet;
 use std::iter::zip;
-use std::time::Instant;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct State {
     terminal: TerminalState,
     pub action: Action,
     pub cards: u64,
-    sbbet: f32,
-    bbbet: f32,
+    pub sbbet: f32,
+    pub bbbet: f32,
     next_to_act: Player,
     pub card_strategies: Option<Strategy>,
     next_states: Vec<State>,
@@ -138,23 +137,30 @@ impl State {
                 _ => panic!("Wrong numher of communal cards"),
             },
 
-            Raise => vec![State {
-                terminal: NonTerminal,
-                action,
-                cards: self.cards,
-                sbbet: match self.next_to_act {
-                    Small => self.bbbet + 1.0,
-                    Big => self.sbbet,
-                },
-                bbbet: match self.next_to_act {
-                    Small => self.bbbet,
-                    Big => self.sbbet + 1.0,
-                },
-                next_to_act: opponent,
-                card_strategies: Some(Strategy::new()),
-                next_states: vec![],
-                permutations: vec![],
-            }],
+            Raise => {
+                let raise_amount = if self.cards.count_ones() < 4 {
+                    1.0
+                } else {
+                    2.0
+                };
+                vec![State {
+                    terminal: NonTerminal,
+                    action,
+                    cards: self.cards,
+                    sbbet: match self.next_to_act {
+                        Small => self.bbbet + raise_amount,
+                        Big => self.sbbet,
+                    },
+                    bbbet: match self.next_to_act {
+                        Small => self.bbbet,
+                        Big => self.sbbet + raise_amount,
+                    },
+                    next_to_act: opponent,
+                    card_strategies: Some(Strategy::new()),
+                    next_states: vec![],
+                    permutations: vec![],
+                }]
+            }
             DealFlop => {
                 let deck = Card::generate_deck();
                 //let flops = deck.combinations(3); // Full game
@@ -230,7 +236,7 @@ impl State {
                 let mut next_states = Vec::new();
                 for river in deck {
                     let num_river = evaluator.cards_to_u64(&[river]);
-                    if num_river & self.cards > 0 {
+                    if (num_river & self.cards) > 0 {
                         continue;
                     }
                     let next_state = State {

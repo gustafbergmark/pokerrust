@@ -1,3 +1,4 @@
+use crate::cuda_interface::init_gpu;
 use std::time::Instant;
 
 mod builder;
@@ -12,6 +13,8 @@ mod strategy;
 mod vector;
 
 fn main() {
+    // Set heap size of gpu
+    init_gpu();
     let mut game = builder::fixed_flop_poker();
     let start = Instant::now();
     for i in 1..=1 {

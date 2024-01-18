@@ -1,5 +1,7 @@
 use crate::vector::Vector;
 extern "C" {
+
+    fn init();
     fn evaluate_showdown_cuda(
         opponent_range: *const f32,
         communal_cards: u64,
@@ -20,6 +22,8 @@ extern "C" {
         bet: f32,
         result: *mut f32,
     );
+
+    fn build_post_river_cuda(cards: u64, bet: f32) -> *const std::ffi::c_void;
 }
 
 pub fn evaluate_showdown_gpu(
@@ -68,4 +72,13 @@ pub fn evaluate_fold_gpu(
         );
     }
     result
+}
+
+pub fn build_post_river(cards: u64, bet: f32) -> *const std::ffi::c_void {
+    let ptr = unsafe { build_post_river_cuda(cards, bet) };
+    ptr
+}
+
+pub fn init_gpu() {
+    unsafe { init() };
 }

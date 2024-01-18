@@ -1,3 +1,4 @@
+use crate::cuda_interface::build_post_river;
 use crate::enums::Action;
 use crate::enums::Action::*;
 use crate::enums::Player::*;
@@ -7,7 +8,8 @@ use crate::game::Game;
 use crate::state::State;
 use itertools::Itertools;
 use poker::Card;
-use std::time::Instant;
+use std::thread::sleep;
+use std::time::{Duration, Instant};
 
 // A variant where the flop is fixed, and no raising the first two rounds of betting.
 // Should be about 1 GB in size
@@ -28,21 +30,29 @@ pub(crate) fn fixed_flop_poker() -> Game<'static> {
     let _states = build(&mut root, &evaluator, 0);
     //dbg!(_states);
     println!("Game created in {} seconds", start.elapsed().as_secs_f32());
+    panic!("only build");
     Game::new(root, evaluator)
 }
 
 fn build(state: &mut State, evaluator: &Evaluator, raises: u8) -> usize {
     let mut count = 1;
     for action in possible_actions(state, raises) {
-        let new_raises = raises
-            + match action {
-                Raise => 1,
-                _ => 0,
-            };
+        let new_raises = match action {
+            Raise => raises + 1,
+            _ => 0,
+        };
         for mut next_state in state.get_action(action, evaluator) {
             count += build(&mut next_state, evaluator, new_raises);
             state.add_action(next_state);
         }
+    }
+    if state.action == DealRiver {
+        //dbg!(count);
+        let start = Instant::now();
+        build_post_river(state.cards, state.sbbet);
+        //dbg!(start.elapsed().as_micros());
+        //panic!("Build once");
+        //sleep(Duration::from_millis(100));
     }
     count
 }

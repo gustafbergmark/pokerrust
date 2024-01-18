@@ -209,7 +209,6 @@ evaluate_fold_kernel(float *opponent_range, long communal_cards, long *card_orde
         float card_sum = 0.0;
         for (int c = 0; c < 51; c++) {
             short index = card_indexes[i * 51 + c];
-            long temp = card_order[index];
             if (communal_cards & card_order[index]) continue;
             card_sum += opponent_range[index];
         }
@@ -287,17 +286,13 @@ void evaluate_fold_cuda(float *opponent_range, long communal_cards, long *card_o
     long *device_card_order;
     cudaMalloc(&device_card_order, 1326 * sizeof(long));
     cudaMemcpy(device_card_order, card_order, 1326 * sizeof(long), cudaMemcpyHostToDevice);
-    cudaError_t err2 = cudaGetLastError();
-    if (err2 != cudaSuccess)
-        printf("Error: %s\n", cudaGetErrorString(err2));
 
     short *device_card_indexes;
     cudaMalloc(&device_card_indexes, 52 * 51 * sizeof(short));
     cudaMemcpy(device_card_indexes, card_indexes, 52 * 51 * sizeof(short), cudaMemcpyHostToDevice);
 
     evaluate_fold_kernel<<<1, 128>>>(device_opponent_range, communal_cards, device_card_order, device_card_indexes,
-                                     updating_player,
-                                     folding_player, bet, device_result);
+                                     updating_player, folding_player, bet, device_result);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess)
