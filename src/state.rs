@@ -371,9 +371,9 @@ impl State {
                 average_strategy
             }
 
-            Showdown => self.evaluate_showdown2(opponent_range, evaluator, updating_player),
-            SBWins => self.evaluate_fold2(opponent_range, evaluator, updating_player, Big),
-            BBWins => self.evaluate_fold2(opponent_range, evaluator, updating_player, Small),
+            Showdown => self.evaluate_showdown(opponent_range, evaluator, updating_player),
+            SBWins => self.evaluate_fold(opponent_range, evaluator, updating_player, Big),
+            BBWins => self.evaluate_fold(opponent_range, evaluator, updating_player, Small),
             Flop => {
                 let mut total = Vector::default();
                 for next_state in self.next_states.iter_mut() {

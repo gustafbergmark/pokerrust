@@ -33,11 +33,13 @@ impl Strategy {
 
     pub fn get_strategy(&self, actions: usize) -> [Vector; 3] {
         let mut regret_match: [Vector; 3] = self.regrets;
-        Self::normalize(&mut regret_match);
+        let sum = regret_match[0] + regret_match[1] + regret_match[2];
         for k in 0..actions {
             for i in 0..1326 {
-                if regret_match[k][i].is_nan() {
+                if sum[i] <= 1e-6 {
                     regret_match[k][i] = 1.0 / (actions as Float);
+                } else {
+                    regret_match[k][i] /= sum[i];
                 }
             }
         }

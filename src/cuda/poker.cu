@@ -120,7 +120,7 @@ __device__ void get_strategy(State *state, DataType *scratch, DataType *result) 
         for (int b = 0; b < 11; b++) {
             int index = tid * 11 + b;
             if (index < 1326) {
-                if (sum[index] == 0.0) {
+                if (sum[index] <= 1e-6) {
                     result[index + i * 1326] = 1.0 / ((DataType) state->transitions);
                 } else {
                     result[index + i * 1326] = state->card_strategies[i][index] / sum[index];
