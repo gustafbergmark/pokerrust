@@ -34,9 +34,11 @@ impl<'a> Game<'a> {
             .root
             .evaluate_state(&Vector::ones(), &self.evaluator, Small, false);
 
+        println!("SMALL DONE");
         let _ = self
             .root
             .evaluate_state(&Vector::ones(), &self.evaluator, Big, false);
+        println!("BIG DONE");
         let iter_time = start.elapsed().as_secs_f32();
         if iter % 10 == 0 {
             let exp_sb = self

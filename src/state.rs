@@ -1,4 +1,7 @@
-use crate::cuda_interface::{evaluate_fold_gpu, evaluate_showdown_gpu};
+use crate::cuda_interface::{
+    build_post_river, evaluate_fold_gpu, evaluate_post_river_gpu, evaluate_showdown_gpu, free_eval,
+    transfer_post_river_eval,
+};
 use crate::enums::Action::*;
 use crate::enums::Player::*;
 use crate::enums::TerminalState::*;
@@ -14,6 +17,7 @@ use poker::{Card, Suit};
 use rayon::iter::ParallelIterator;
 use std::collections::HashSet;
 use std::iter::zip;
+use std::time::Instant;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct State {
@@ -26,6 +30,7 @@ pub(crate) struct State {
     pub card_strategies: Option<Strategy>,
     next_states: Vec<State>,
     permutations: Vec<[Suit; 4]>,
+    gpu_pointer: Option<*const std::ffi::c_void>,
 }
 
 impl State {
@@ -46,6 +51,7 @@ impl State {
             card_strategies: Some(Strategy::new()),
             next_states: vec![],
             permutations: vec![],
+            gpu_pointer: None,
         }
     }
 
@@ -77,6 +83,7 @@ impl State {
                 card_strategies: None,
                 next_states: vec![],
                 permutations: vec![],
+                gpu_pointer: None,
             }],
             Check => vec![State {
                 terminal: NonTerminal,
@@ -88,6 +95,7 @@ impl State {
                 card_strategies: Some(Strategy::new()),
                 next_states: vec![],
                 permutations: vec![],
+                gpu_pointer: None,
             }],
             Call => match self.cards.count_ones() {
                 0 => vec![State {
@@ -100,6 +108,7 @@ impl State {
                     card_strategies: None,
                     next_states: vec![],
                     permutations: vec![],
+                    gpu_pointer: None,
                 }],
                 3 => vec![State {
                     terminal: Turn,
@@ -111,6 +120,7 @@ impl State {
                     card_strategies: None,
                     next_states: vec![],
                     permutations: vec![],
+                    gpu_pointer: None,
                 }],
                 4 => vec![State {
                     terminal: River,
@@ -122,6 +132,7 @@ impl State {
                     card_strategies: None,
                     next_states: vec![],
                     permutations: vec![],
+                    gpu_pointer: None,
                 }],
                 5 => vec![State {
                     terminal: Showdown,
@@ -133,6 +144,7 @@ impl State {
                     card_strategies: None,
                     next_states: vec![],
                     permutations: vec![],
+                    gpu_pointer: None,
                 }],
                 _ => panic!("Wrong numher of communal cards"),
             },
@@ -159,6 +171,7 @@ impl State {
                     card_strategies: Some(Strategy::new()),
                     next_states: vec![],
                     permutations: vec![],
+                    gpu_pointer: None,
                 }]
             }
             DealFlop => {
@@ -203,6 +216,7 @@ impl State {
                         card_strategies: Some(Strategy::new()),
                         next_states: vec![],
                         permutations: possible_permutations,
+                        gpu_pointer: None,
                     };
                     next_states.push(next_state);
                 }
@@ -226,6 +240,7 @@ impl State {
                         card_strategies: Some(Strategy::new()),
                         next_states: vec![],
                         permutations: vec![],
+                        gpu_pointer: None,
                     };
                     next_states.push(next_state);
                 }
@@ -239,6 +254,9 @@ impl State {
                     if (num_river & self.cards) > 0 {
                         continue;
                     }
+
+                    let gpu_ptr = build_post_river(self.cards | num_river, self.sbbet);
+
                     let next_state = State {
                         terminal: NonTerminal,
                         action: DealRiver,
@@ -249,6 +267,7 @@ impl State {
                         card_strategies: Some(Strategy::new()),
                         next_states: vec![],
                         permutations: vec![],
+                        gpu_pointer: Some(gpu_ptr),
                     };
                     next_states.push(next_state);
                 }
@@ -314,6 +333,30 @@ impl State {
                         average_strategy += utility;
                     }
                 }
+                if self.action == DealRiver {
+                    let eval_ptr = transfer_post_river_eval(evaluator, self.cards);
+                    let start = Instant::now();
+                    let gpu = evaluate_post_river_gpu(
+                        self.gpu_pointer.expect("Should have GPU pointer"),
+                        eval_ptr,
+                        opponent_range,
+                        updating_player,
+                    );
+                    for i in 0..1326 {
+                        //println!("{} {}", average_strategy[i], gpu[i]);
+                        assert_approx_eq!(average_strategy[i], gpu[i], 1e1);
+                        // if (average_strategy[i] - gpu[i]).abs() > 1e-1 {
+                        //     dbg!(evaluator.u64_to_cards(self.cards));
+                        //     for j in 0..1326 {
+                        //         println!("{} {}", average_strategy[i], gpu[i]);
+                        //     }
+                        //     assert_approx_eq!(average_strategy[i], gpu[i], 1e-0);
+                        // }
+                    }
+                    free_eval(eval_ptr);
+                    //panic!("Once");
+                    //println!("COMPLETE {} micros", start.elapsed().as_micros());
+                }
                 // update strategy
                 if self.next_to_act == updating_player && !calc_exploit {
                     let mut update = [Vector::default(); 3];
@@ -324,6 +367,7 @@ impl State {
                     }
                     self.card_strategies.as_mut().unwrap().update_add(&update);
                 }
+
                 average_strategy
             }
 
@@ -414,11 +458,16 @@ impl State {
             folding_player,
             bet,
         );
-
+        let mut sum = 0.0;
         for i in 0..1326 {
             //println!("{} {} {}", i, correct[i], test[i]);
+            sum += test[i];
             assert_approx_eq!(correct[i], test[i], 1e-1);
         }
+        // println!(
+        //     "CPU sum: {} fp {} up {} bet {}",
+        //     sum, folding_player, updating_player, bet
+        // );
         //panic!("Run once");
         //println!("COMPLETE");
 

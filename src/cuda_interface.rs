@@ -1,3 +1,5 @@
+use crate::enums::Player;
+use crate::evaluator::Evaluator;
 use crate::vector::Vector;
 extern "C" {
 
@@ -24,6 +26,21 @@ extern "C" {
     );
 
     fn build_post_river_cuda(cards: u64, bet: f32) -> *const std::ffi::c_void;
+    fn transfer_post_river_eval_cuda(
+        card_order: *const u64,
+        card_indexes: *const u16,
+        eval: *const u16,
+        coll_vec: *const u16,
+    ) -> *const std::ffi::c_void;
+    fn free_eval_cuda(ptr: *const std::ffi::c_void);
+
+    fn evaluate_post_river_cuda(
+        opponent_range: *const f32,
+        state: *const std::ffi::c_void,
+        evaluator: *const std::ffi::c_void,
+        updating_player: u16,
+        result: *mut f32,
+    );
 }
 
 pub fn evaluate_showdown_gpu(
@@ -81,4 +98,44 @@ pub fn build_post_river(cards: u64, bet: f32) -> *const std::ffi::c_void {
 
 pub fn init_gpu() {
     unsafe { init() };
+}
+
+pub fn transfer_post_river_eval(eval: &Evaluator, communal_cards: u64) -> *const std::ffi::c_void {
+    unsafe {
+        transfer_post_river_eval_cuda(
+            eval.card_order().as_ptr(),
+            eval.card_indexes().as_ptr(),
+            eval.vectorized_eval(communal_cards).as_ptr(),
+            eval.collisions(communal_cards).as_ptr(),
+        )
+    }
+}
+
+pub fn free_eval(ptr: *const std::ffi::c_void) {
+    unsafe {
+        free_eval_cuda(ptr);
+    }
+}
+
+pub fn evaluate_post_river_gpu(
+    state: *const std::ffi::c_void,
+    evaluator: *const std::ffi::c_void,
+    opponent_range: &Vector,
+    updating_player: Player,
+) -> Vector {
+    let mut result = Vector::default();
+    let updating_player = match updating_player {
+        Player::Small => 0,
+        Player::Big => 1,
+    };
+    unsafe {
+        evaluate_post_river_cuda(
+            opponent_range.values.as_ptr(),
+            state,
+            evaluator,
+            updating_player,
+            result.values.as_mut_ptr(),
+        );
+    }
+    result
 }

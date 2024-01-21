@@ -1,38 +1,8 @@
 #include <stdio.h>
 #include <cuda_runtime.h>
+#include "structs.h"
 
 
-enum TerminalState {
-    NonTerminal,
-    SBWins,
-    BBWins,
-    Showdown,
-};
-
-enum Action {
-    Fold,
-    Check,
-    Call,
-    Raise,
-    DealRiver,
-};
-
-enum Player {
-    Small,
-    Big,
-};
-
-struct State {
-    TerminalState terminal;
-    Action action;
-    long cards;
-    float sbbet;
-    float bbbet;
-    Player next_to_act;
-    short transitions;
-    float *card_strategies[3];
-    State *next_states[3];
-};
 
 __device__ int possible_actions(Action prev, short raises, Action *result) {
     switch (prev) {
@@ -86,8 +56,8 @@ __device__ void get_action(State *state, Action action, State *new_state) {
             break;
         case Raise :
             new_state->terminal = NonTerminal;
-            new_state->sbbet = state->next_to_act == Small ? state->sbbet + 2.0 : state->sbbet;
-            new_state->bbbet = state->next_to_act == Big ? state->bbbet + 2.0 : state->bbbet;
+            new_state->sbbet = state->next_to_act == Small ? state->bbbet + 2.0 : state->sbbet;
+            new_state->bbbet = state->next_to_act == Big ? state->sbbet + 2.0 : state->bbbet;
             break;
     }
 }
@@ -139,10 +109,10 @@ void init() {
     cudaDeviceGetLimit(size, cudaLimitStackSize);
     printf("old stack size: %zu\n", *size);
     // Allocate 6 GiBi heap
-    size_t heap_size = 6l * 1024l * 1024l * 1024l;
+    size_t heap_size = 8l * 1024l * 1024l * 1024l;
     cudaDeviceSetLimit(cudaLimitMallocHeapSize, heap_size);
     // Too small stack will result in: unspecified launch failure
-    cudaDeviceSetLimit(cudaLimitStackSize, 4096);
+    cudaDeviceSetLimit(cudaLimitStackSize, 2*4096);
     cudaDeviceGetLimit(size, cudaLimitMallocHeapSize);
     printf("new heap size: %zu\n", *size);
     cudaDeviceGetLimit(size, cudaLimitStackSize);
@@ -190,5 +160,25 @@ State *build_post_river_cuda(long cards, float bet) {
     cudaFree(device_state_index);
     cudaFree(device_vector_index);
     return root;
+}
+Evaluator * transfer_post_river_eval_cuda(long *card_order, short *card_indexes, short *eval, short* coll_vec) {
+    cudaError_t err;
+    Evaluator* device_eval;
+    cudaMalloc(&device_eval, sizeof (Evaluator));
+    cudaMemcpy(&device_eval->card_order, card_order, 1326 * sizeof (long), cudaMemcpyHostToDevice);
+    cudaMemcpy(&device_eval->card_indexes, card_indexes, 52 * 51 * sizeof (short), cudaMemcpyHostToDevice);
+    cudaMemcpy(&device_eval->eval, eval, (1326 + 128 * 2) * sizeof (short), cudaMemcpyHostToDevice);
+    cudaMemcpy(&device_eval->coll_vec, coll_vec, 52 * 51 * sizeof (short), cudaMemcpyHostToDevice);
+
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("Error: %s\n", cudaGetErrorString(err));
+        fflush(stdout);
+    }
+
+    return device_eval;
+}
+void free_eval_cuda(Evaluator * device_eval) {
+    cudaFree(device_eval);
 }
 }

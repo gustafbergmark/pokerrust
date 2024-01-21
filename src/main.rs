@@ -19,6 +19,7 @@ fn main() {
     let start = Instant::now();
     for i in 1..=1 {
         game.perform_iter(i);
+        println!("iter done");
     }
     //dbg!(&game);
     dbg!(start.elapsed().as_millis());

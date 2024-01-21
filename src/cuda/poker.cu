@@ -1,5 +1,64 @@
 #include <stdio.h>
 #include <cuda_runtime.h>
+#include "math.h"
+#include "structs.h"
+// Everything expect a  dimension of 1x128, and vectors of size 1326 (most of the time)
+
+__device__ void multiply(float *v1, float *v2, float *res) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    for (int b = 0; b < 11; b++) {
+        int index = i * 11 + b;
+        if (index < 1326) {
+            res[index] = v1[index] * v2[index];
+        }
+    }
+    __syncthreads();
+}
+
+__device__ void fma(float *v1, float *v2, float *res) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    for (int b = 0; b < 11; b++) {
+        int index = i * 11 + b;
+        if (index < 1326) {
+            res[index] += v1[index] * v2[index];
+        }
+    }
+    __syncthreads();
+}
+
+__device__ void add_assign(float *v1, float *v2) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    for (int b = 0; b < 11; b++) {
+        int index = i * 11 + b;
+        if (index < 1326) {
+            v1[index] += v2[index];
+        }
+    }
+    __syncthreads();
+}
+
+__device__ void sub_assign(float *v1, float *v2) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    for (int b = 0; b < 11; b++) {
+        int index = i * 11 + b;
+        if (index < 1326) {
+            v1[index] -= v2[index];
+        }
+    }
+    __syncthreads();
+}
+
+
+__device__ void zero(float *v) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    for (int b = 0; b < 11; b++) {
+        int index = i * 11 + b;
+        if (index < 1326) {
+            v[index] = 0;
+        }
+    }
+    __syncthreads();
+}
 
 __device__ void p_sum(float *input, int i) {
     int offset = 1;
@@ -29,8 +88,7 @@ __device__ void p_sum(float *input, int i) {
     __syncthreads();
 }
 
-__device__ void cuda_prefix_sum(float *input) {
-    __shared__ float temp[128];
+__device__ void cuda_prefix_sum(float *input, float *temp) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     temp[i] = 0;
     for (int b = 0; b < 11; b++) {
@@ -47,6 +105,40 @@ __device__ void cuda_prefix_sum(float *input) {
             float t = input[i * 11 + b];
             input[i * 11 + b] = prefix;
             prefix += t;
+        }
+    }
+}
+
+__device__ void get_strategy(State *state, float *scratch, float *result) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    float *sum = scratch;
+    zero(sum);
+    for (int i = 0; i < state->transitions; i++) {
+        add_assign(sum, state->card_strategies[i]);
+    }
+    for (int i = 0; i < state->transitions; i++) {
+        for (int b = 0; b < 11; b++) {
+            int index = tid * 11 + b;
+            if (index < 1326) {
+                if (sum[index] == 0.0) {
+                    result[index + i * 1326] = 1.0 / ((float) state->transitions);
+                } else {
+                    result[index + i * 1326] = state->card_strategies[i][index] / sum[index];
+                }
+            }
+        }
+    }
+}
+
+__device__ void update_strategy(State *state, float *update) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    for (int i = 0; i < state->transitions; i++) {
+        add_assign(state->card_strategies[i], update + 1326*i);
+        for (int b = 0; b < 11; b++) {
+            int index = tid * 11 + b;
+            if (index < 1326) {
+                state->card_strategies[i][index] = max(state->card_strategies[i][index], 0.0);
+            }
         }
     }
 }
@@ -99,12 +191,12 @@ handle_collisions(int i, long communal_cards, long *card_order, short *eval, sho
     __syncthreads();
 }
 
-__global__ void
-evaluate_showdown_kernel(float *opponent_range, long communal_cards, long *card_order, short *eval,
-                         short *coll_vec, float bet, float *result) {
+__device__ void
+evaluate_showdown_kernel_inner(float *opponent_range, long communal_cards, long *card_order, short *eval,
+                               short *coll_vec, float bet, float *result, float *sorted_range, float *sorted_eval,
+                               float *temp) {
+    __syncthreads();
     // Setup
-    __shared__ float sorted_range[1327];
-    __shared__ float sorted_eval[1326];
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     // Sort hands by eval
@@ -131,7 +223,7 @@ evaluate_showdown_kernel(float *opponent_range, long communal_cards, long *card_
     __syncthreads();
 
     // Calculate prefix sum
-    cuda_prefix_sum(sorted_range);
+    cuda_prefix_sum(sorted_range, temp);
     __syncthreads();
     if (i == 0) {
         sorted_range[1326] = sorted_range[1325] + opponent_range[eval[1325] & 2047];
@@ -176,10 +268,21 @@ evaluate_showdown_kernel(float *opponent_range, long communal_cards, long *card_
 }
 
 __global__ void
-evaluate_fold_kernel(float *opponent_range, long communal_cards, long *card_order, short *card_indexes,
-                     short updating_player, short folding_player, float bet, float *result) {
+evaluate_showdown_kernel(float *opponent_range, long communal_cards, long *card_order, short *eval,
+                         short *coll_vec, float bet, float *result) {
+    __shared__ float sorted_range[1327];
+    __shared__ float sorted_eval[1326];
+    __shared__ float temp[128];
+    evaluate_showdown_kernel_inner(opponent_range, communal_cards, card_order, eval, coll_vec, bet, result,
+                                   sorted_range, sorted_eval, temp);
+}
+
+__device__ void
+evaluate_fold_kernel_inner(float *opponent_range, long communal_cards, long *card_order, short *card_indexes,
+                           short updating_player, short folding_player, float bet, float *result, float *range_sum,
+                           float *temp) {
+    __syncthreads();
     // Setup
-    __shared__ float range_sum[1326];
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     for (int b = 0; b < 11; b++) {
@@ -199,7 +302,7 @@ evaluate_fold_kernel(float *opponent_range, long communal_cards, long *card_orde
     __syncthreads();
 
     // Calculate prefix sum
-    cuda_prefix_sum(range_sum);
+    cuda_prefix_sum(range_sum, temp);
 
     __syncthreads();
     // using result[1325] is a bit hacky, but correct
@@ -233,6 +336,93 @@ evaluate_fold_kernel(float *opponent_range, long communal_cards, long *card_orde
         }
     }
     __syncthreads();
+}
+
+__global__ void
+evaluate_fold_kernel(float *opponent_range, long communal_cards, long *card_order, short *card_indexes,
+                     short updating_player, short folding_player, float bet, float *result) {
+    __shared__ float range_sum[1326];
+    __shared__ float temp[128];
+    evaluate_fold_kernel_inner(opponent_range, communal_cards, card_order, card_indexes, updating_player,
+                               folding_player, bet, result, range_sum, temp);
+}
+
+__device__ void evaluate_post_river_kernel_inner(float *opponent_range,
+                                                 State *state,
+                                                 Evaluator *evaluator,
+                                                 Player updating_player,
+                                                 float *scratch,
+                                                 float *result, float *sorted_range, float *sorted_eval, float *temp) {
+    __syncthreads();
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    switch (state->terminal) {
+        case Showdown :
+            evaluate_showdown_kernel_inner(opponent_range, state->cards, evaluator->card_order, evaluator->eval,
+                                           evaluator->coll_vec, state->sbbet, result, sorted_range, sorted_eval, temp);
+            break;
+        case SBWins :
+            evaluate_fold_kernel_inner(opponent_range, state->cards, evaluator->card_order, evaluator->card_indexes,
+                                       updating_player, 1, state->bbbet, result, sorted_eval, temp);
+            break;
+        case BBWins :
+            evaluate_fold_kernel_inner(opponent_range, state->cards, evaluator->card_order, evaluator->card_indexes,
+                                       updating_player, 0, state->sbbet, result, sorted_eval, temp);
+            break;
+        case NonTerminal :
+            float *average_strategy = result;
+            zero(average_strategy);
+            float *action_probs = scratch;
+            scratch += 1326 * state->transitions; // + state->transitions
+            get_strategy(state, scratch, action_probs);
+            float *results = scratch;
+            scratch += 1326 * state->transitions; // + state-> transitions
+            for (int i = 0; i < state->transitions; i++) {
+                float *new_result = results + 1326 * i;
+                float *action_prob = action_probs + 1326 * i;
+                State *next = state->next_states[i];
+                float *new_range;
+                if (state->next_to_act == updating_player) {
+                    new_range = opponent_range;
+                } else {
+                    new_range = scratch;
+                    scratch += 1326; // + 1
+                    multiply(opponent_range, action_prob, new_range);
+                }
+                __syncthreads();
+                evaluate_post_river_kernel_inner(new_range, next, evaluator, updating_player, scratch, new_result,
+                                                 sorted_range, sorted_eval, temp);
+                __syncthreads();
+                if (updating_player == state->next_to_act) {
+                    fma(new_result, action_prob, average_strategy);
+                } else {
+                    add_assign(average_strategy, new_result);
+                }
+            }
+            if (state->next_to_act == updating_player) {
+                for (int i = 0; i < state->transitions; i++) {
+                    float *util = results + 1326 * i;
+                    sub_assign(util, average_strategy);
+                }
+                update_strategy(state, results);
+            }
+
+            break;
+    }
+    __syncthreads();
+}
+
+__global__ void evaluate_post_river_kernel(float *opponent_range,
+                                           State *state,
+                                           Evaluator *evaluator,
+                                           Player updating_player,
+                                           float *scratch,
+                                           float *result) {
+    __shared__ float sorted_range[1327];
+    __shared__ float sorted_eval[1326];
+    __shared__ float temp[128];
+    evaluate_post_river_kernel_inner(opponent_range, state, evaluator, updating_player, scratch, result, sorted_range,
+                                     sorted_eval, temp);
 }
 
 
@@ -305,5 +495,39 @@ void evaluate_fold_cuda(float *opponent_range, long communal_cards, long *card_o
     cudaFree(device_result);
     cudaFree(device_card_order);
     cudaFree(device_card_indexes);
+}
+
+void evaluate_post_river_cuda(float *opponent_range,
+                              State *state,
+                              Evaluator *evaluator,
+                              short updating_player,
+                              float *result) {
+    float *device_opponent_range;
+    cudaMalloc(&device_opponent_range, 1326 * sizeof(float));
+    cudaMemcpy(device_opponent_range, opponent_range, 1326 * sizeof(float), cudaMemcpyHostToDevice);
+
+    float *device_result;
+    cudaMalloc(&device_result, 1326 * sizeof(float));
+
+    float *device_scratch;
+    int scratch_size = 1326 * sizeof(float) * 7 *
+                       6; // Max 7 ( 3 results, 3 action probs, 1 new_probs) vectors per level, max depth of 6
+    cudaMalloc(&device_scratch, scratch_size);
+    cudaMemset(device_scratch, 0, scratch_size);
+
+    evaluate_post_river_kernel<<<1, 128>>>(device_opponent_range, state, evaluator, updating_player == 0 ? Small : Big, device_scratch,
+                                           device_result);
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("Error: %s\n", cudaGetErrorString(err));
+        fflush(stdout);
+    }
+    cudaDeviceSynchronize();
+    cudaMemcpy(result, device_result, 1326 * sizeof(float), cudaMemcpyDeviceToHost);
+
+    cudaFree(device_opponent_range);
+    cudaFree(device_scratch);
+    cudaFree(device_result);
 }
 }
