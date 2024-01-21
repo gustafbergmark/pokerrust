@@ -34,7 +34,7 @@ __device__ int possible_actions(Action prev, short raises, Action *result) {
 __device__ void get_action(State *state, Action action, State *new_state) {
     Player opponent = state->next_to_act == Small ? Big : Small;
     TerminalState fold_winner = state->next_to_act == Small ? BBWins : SBWins;
-    float other_bet = state->next_to_act == Small ? state->bbbet : state->sbbet;
+    DataType other_bet = state->next_to_act == Small ? state->bbbet : state->sbbet;
 
     // Copy state and reset some values
     *new_state = *state;
@@ -62,7 +62,7 @@ __device__ void get_action(State *state, Action action, State *new_state) {
     }
 }
 
-__device__ void add_transition(State *parent, State *child, float* vectors, int* vector_index) {
+__device__ void add_transition(State *parent, State *child, DataType* vectors, int* vector_index) {
     parent->card_strategies[parent->transitions] = vectors + (*vector_index * 1326);
     *vector_index += 1;
     parent->next_states[parent->transitions] = child;
@@ -70,7 +70,7 @@ __device__ void add_transition(State *parent, State *child, float* vectors, int*
 }
 
 
-__device__ int build(State *state, short raises, State* root, float* vectors, int *state_index, int* vector_index) {
+__device__ int build(State *state, short raises, State* root, DataType* vectors, int *state_index, int* vector_index) {
     Action actions[3] = {};
     int count = 1;
     int num_actions = possible_actions(state->action, raises, actions);
@@ -86,7 +86,7 @@ __device__ int build(State *state, short raises, State* root, float* vectors, in
     return count;
 }
 
-__global__ void build_post_river_kernel(long cards, float bet, State *root, float* vectors, int *state_index, int* vector_index) {
+__global__ void build_post_river_kernel(long cards, DataType bet, State *root, DataType* vectors, int *state_index, int* vector_index) {
     *root = {.terminal = NonTerminal,
             .action = DealRiver,
             .cards = cards,
@@ -119,7 +119,7 @@ void init() {
     printf("new stack size: %zu\n", *size);
     fflush(stdout);
 }
-State *build_post_river_cuda(long cards, float bet) {
+State *build_post_river_cuda(long cards, DataType bet) {
     cudaError_t err;
     int vector_index = 0;
     int state_index = 0;
@@ -134,8 +134,8 @@ State *build_post_river_cuda(long cards, float bet) {
     State *root;
     cudaMalloc(&root, sizeof(State) * 27);
 
-    float *vectors;
-    int vectors_size = sizeof(float) * 26 * 1326;
+    DataType *vectors;
+    int vectors_size = sizeof(DataType) * 26 * 1326;
     cudaMalloc(&vectors, vectors_size);
     cudaMemset(vectors, 0, vectors_size);
     err = cudaGetLastError();

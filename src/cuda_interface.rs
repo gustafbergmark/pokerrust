@@ -1,31 +1,31 @@
 use crate::enums::Player;
 use crate::evaluator::Evaluator;
-use crate::vector::Vector;
+use crate::vector::{Float, Vector};
 extern "C" {
 
     fn init();
     fn evaluate_showdown_cuda(
-        opponent_range: *const f32,
+        opponent_range: *const Float,
         communal_cards: u64,
         card_order: *const u64,
         eval: *const u16,
         coll_vec: *const u16,
-        bet: f32,
-        result: *mut f32,
+        bet: Float,
+        result: *mut Float,
     );
 
     fn evaluate_fold_cuda(
-        opponent_range: *const f32,
+        opponent_range: *const Float,
         communal_cards: u64,
         card_order: *const u64,
         card_indexes: *const u16,
         updating_player: u16,
         folding_player: u16,
-        bet: f32,
-        result: *mut f32,
+        bet: Float,
+        result: *mut Float,
     );
 
-    fn build_post_river_cuda(cards: u64, bet: f32) -> *const std::ffi::c_void;
+    fn build_post_river_cuda(cards: u64, bet: Float) -> *const std::ffi::c_void;
     fn transfer_post_river_eval_cuda(
         card_order: *const u64,
         card_indexes: *const u16,
@@ -35,11 +35,11 @@ extern "C" {
     fn free_eval_cuda(ptr: *const std::ffi::c_void);
 
     fn evaluate_post_river_cuda(
-        opponent_range: *const f32,
+        opponent_range: *const Float,
         state: *const std::ffi::c_void,
         evaluator: *const std::ffi::c_void,
         updating_player: u16,
-        result: *mut f32,
+        result: *mut Float,
     );
 }
 
@@ -49,7 +49,7 @@ pub fn evaluate_showdown_gpu(
     card_order: &Vec<u64>,
     eval: &Vec<u16>,
     coll_vec: &Vec<u16>,
-    bet: f32,
+    bet: Float,
 ) -> Vector {
     let mut result = Vector::default();
     unsafe {
@@ -73,7 +73,7 @@ pub fn evaluate_fold_gpu(
     card_indexes: &Vec<u16>,
     updating_player: u16,
     folding_player: u16,
-    bet: f32,
+    bet: Float,
 ) -> Vector {
     let mut result = Vector::default();
     unsafe {
@@ -91,7 +91,7 @@ pub fn evaluate_fold_gpu(
     result
 }
 
-pub fn build_post_river(cards: u64, bet: f32) -> *const std::ffi::c_void {
+pub fn build_post_river(cards: u64, bet: Float) -> *const std::ffi::c_void {
     let ptr = unsafe { build_post_river_cuda(cards, bet) };
     ptr
 }

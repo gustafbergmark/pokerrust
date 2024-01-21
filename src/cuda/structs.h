@@ -5,6 +5,8 @@
 #ifndef POKERRUST_STRUCTS_H
 #define POKERRUST_STRUCTS_H
 
+#define DataType double
+
 enum TerminalState {
     NonTerminal,
     SBWins,
@@ -30,11 +32,11 @@ struct State {
     TerminalState terminal;
     Action action;
     long cards;
-    float sbbet;
-    float bbbet;
+    DataType sbbet;
+    DataType bbbet;
     Player next_to_act;
     short transitions;
-    float *card_strategies[3];
+    DataType *card_strategies[3];
     State *next_states[3];
 };
 

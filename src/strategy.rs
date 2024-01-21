@@ -1,3 +1,4 @@
+use crate::vector::Float;
 use crate::vector::Vector;
 use std::fmt::{Debug, Formatter};
 
@@ -36,7 +37,7 @@ impl Strategy {
         for k in 0..actions {
             for i in 0..1326 {
                 if regret_match[k][i].is_nan() {
-                    regret_match[k][i] = 1.0 / (actions as f32);
+                    regret_match[k][i] = 1.0 / (actions as Float);
                 }
             }
         }

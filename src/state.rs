@@ -9,7 +9,7 @@ use crate::enums::*;
 use crate::evaluator::Evaluator;
 use crate::permutation_handler::permute;
 use crate::strategy::Strategy;
-use crate::vector::Vector;
+use crate::vector::{Float, Vector};
 use assert_approx_eq::assert_approx_eq;
 use itertools::Itertools;
 use poker::Suit::*;
@@ -24,8 +24,8 @@ pub(crate) struct State {
     terminal: TerminalState,
     pub action: Action,
     pub cards: u64,
-    pub sbbet: f32,
-    pub bbbet: f32,
+    pub sbbet: Float,
+    pub bbbet: Float,
     next_to_act: Player,
     pub card_strategies: Option<Strategy>,
     next_states: Vec<State>,
@@ -37,8 +37,8 @@ impl State {
     pub fn new(
         terminal: TerminalState,
         action: Action,
-        sbbet: f32,
-        bbbet: f32,
+        sbbet: Float,
+        bbbet: Float,
         next_to_act: Player,
     ) -> Self {
         State {
@@ -289,7 +289,7 @@ impl State {
             NonTerminal => {
                 // Observe: This vector is also used when calculating the exploitability
                 let mut average_strategy = if updating_player == self.next_to_act && calc_exploit {
-                    Vector::from(&[f32::NEG_INFINITY; 1326])
+                    Vector::from(&[Float::NEG_INFINITY; 1326])
                 } else {
                     Vector::default()
                 };
@@ -344,7 +344,7 @@ impl State {
                     );
                     for i in 0..1326 {
                         //println!("{} {}", average_strategy[i], gpu[i]);
-                        assert_approx_eq!(average_strategy[i], gpu[i], 1e1);
+                        assert_approx_eq!(average_strategy[i], gpu[i], 1e-6);
                         // if (average_strategy[i] - gpu[i]).abs() > 1e-1 {
                         //     dbg!(evaluator.u64_to_cards(self.cards));
                         //     for j in 0..1326 {
@@ -400,7 +400,7 @@ impl State {
                     );
                     total += res;
                 }
-                total * (1.0 / (self.next_states.len() as f32))
+                total * (1.0 / (self.next_states.len() as Float))
             }
             River => {
                 // Some parallelization
@@ -422,7 +422,7 @@ impl State {
                     total += val;
                 }
 
-                total * (1.0 / (self.next_states.len() as f32))
+                total * (1.0 / (self.next_states.len() as Float))
             }
         }
     }
@@ -462,14 +462,14 @@ impl State {
         for i in 0..1326 {
             //println!("{} {} {}", i, correct[i], test[i]);
             sum += test[i];
-            assert_approx_eq!(correct[i], test[i], 1e-1);
+            assert_approx_eq!(correct[i], test[i], 1e-6);
         }
         // println!(
         //     "CPU sum: {} fp {} up {} bet {}",
         //     sum, folding_player, updating_player, bet
         // );
         //panic!("Run once");
-        //println!("COMPLETE");
+        //println!("COMPLETE FOLD");
 
         correct
     }
@@ -540,10 +540,10 @@ impl State {
         let result = self.evaluate_showdown(opponent_range, evaluator, updating_player);
         for i in 0..1326 {
             //println!("{} {} {}", i, result_gpu[i], result[i]);
-            assert_approx_eq!(result_gpu[i], result[i], 1e-1);
+            assert_approx_eq!(result_gpu[i], result[i], 1e-6);
         }
         //panic!("Run once");
-        //println!("COMPLETE");
+        //println!("COMPLETE SHOWDOWN");
         result
     }
 

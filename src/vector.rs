@@ -3,11 +3,13 @@ use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, 
 #[repr(align(256))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Vector {
-    pub values: [f32; 1326],
+    pub values: [Float; 1326],
 }
 
+pub(crate) type Float = f64;
+
 impl Vector {
-    pub fn from(v: &[f32]) -> Self {
+    pub fn from(v: &[Float]) -> Self {
         Vector {
             values: v.try_into().unwrap(),
         }
@@ -18,8 +20,8 @@ impl Vector {
         }
     }
 
-    pub fn sum(&self) -> f32 {
-        self.values.iter().sum::<f32>()
+    pub fn sum(&self) -> Float {
+        self.values.iter().sum::<Float>()
     }
 }
 
@@ -32,7 +34,7 @@ impl Default for Vector {
 }
 
 impl Index<usize> for Vector {
-    type Output = f32;
+    type Output = Float;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.values[index]
@@ -57,10 +59,10 @@ impl Mul for Vector {
     }
 }
 
-impl Mul<f32> for Vector {
+impl Mul<Float> for Vector {
     type Output = Self;
 
-    fn mul(self, rhs: f32) -> Self::Output {
+    fn mul(self, rhs: Float) -> Self::Output {
         let mut values = [0.0; 1326];
         for i in 0..1326 {
             values[i] = self.values[i] * rhs;
@@ -77,8 +79,8 @@ impl MulAssign for Vector {
     }
 }
 
-impl MulAssign<f32> for Vector {
-    fn mul_assign(&mut self, rhs: f32) {
+impl MulAssign<Float> for Vector {
+    fn mul_assign(&mut self, rhs: Float) {
         for i in 0..1326 {
             self.values[i] *= rhs;
         }
@@ -144,10 +146,10 @@ impl DivAssign for Vector {
         }
     }
 }
-impl Div<f32> for Vector {
+impl Div<Float> for Vector {
     type Output = Self;
 
-    fn div(self, rhs: f32) -> Self::Output {
+    fn div(self, rhs: Float) -> Self::Output {
         let mut values = [0.0; 1326];
         for i in 0..1326 {
             values[i] = self.values[i] / rhs;

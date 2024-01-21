@@ -1,4 +1,4 @@
-use crate::vector::Vector;
+use crate::vector::{Float, Vector};
 use poker::Suit;
 use poker::Suit::*;
 use std::ops::Range;
@@ -57,7 +57,7 @@ fn get_color_position(suits: [Suit; 2]) -> (Range<usize>, bool) {
     }
 }
 
-fn transpose(v: &mut [f32]) {
+fn transpose(v: &mut [Float]) {
     let mut res = [0.0; 169];
     for (i, chunk) in v.chunks_exact(13).enumerate() {
         for (j, val) in chunk.iter().enumerate() {
