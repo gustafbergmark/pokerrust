@@ -16,45 +16,34 @@ impl<T: Sized + Clone, const N: usize, const K: usize> CombinationMap<T, N, K> {
     }
 
     pub fn get(&self, key: u64) -> Option<&T> {
-        match self.get_ordering_index(key) {
-            None => None,
-            Some(index) => self.values[index].as_ref(),
-        }
+        self.values[Self::get_ordering_index(key)].as_ref()
     }
 
     pub fn get_mut(&mut self, key: u64) -> Option<&mut T> {
-        match self.get_ordering_index(key) {
-            None => None,
-            Some(index) => self.values[index].as_mut(),
-        }
+        self.values[Self::get_ordering_index(key)].as_mut()
     }
 
     pub fn insert(&mut self, key: u64, value: T) -> Option<T> {
-        let index = self
-            .get_ordering_index(key)
-            .expect("Key is not valid combination");
+        let index = Self::get_ordering_index(key);
         let old = self.get(key).map(|elem| elem.clone());
         self.values[index] = Some(value);
         old
     }
 
     #[inline]
-    fn get_ordering_index(&self, mut set: u64) -> Option<usize> {
-        if set.count_ones() as usize == K {
-            let mut res = 0;
-            for c in 1..=K {
-                let i = set.trailing_zeros();
-                res += choose(i as usize, c);
-                set ^= 1 << i;
-            }
-            Some(res)
-        } else {
-            None
+    pub fn get_ordering_index(mut set: u64) -> usize {
+        assert_eq!(set.count_ones() as usize, K);
+        let mut res = 0;
+        for c in 1..=K {
+            let i = set.trailing_zeros();
+            res += choose(i as usize, c);
+            set ^= 1 << i;
         }
+        res
     }
 
     #[inline]
-    fn next(x: u64) -> u64 {
+    pub fn next(x: u64) -> u64 {
         let c = x & -(x as i64) as u64;
         let r = x + c;
         let ret = ((x ^ r) / (4 * c)) | r;

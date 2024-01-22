@@ -1,6 +1,6 @@
 use crate::cuda_interface::{
     build_river, evaluate_fold_gpu, evaluate_post_river_gpu, evaluate_showdown_gpu, free_eval,
-    transfer_post_river_eval,
+    transfer_flop_eval,
 };
 use crate::enums::Action::*;
 use crate::enums::Player::*;
@@ -283,6 +283,7 @@ impl State {
         evaluator: &Evaluator,
         updating_player: Player,
         calc_exploit: bool,
+        gpu_eval_ptr: Option<*const std::ffi::c_void>,
     ) -> Vector {
         //(util of sb, util of bb, exploitability of updating player)
         match self.terminal {
@@ -310,6 +311,7 @@ impl State {
                             evaluator,
                             updating_player,
                             calc_exploit,
+                            gpu_eval_ptr,
                         )
                     } else {
                         next.evaluate_state(
@@ -317,6 +319,7 @@ impl State {
                             evaluator,
                             updating_player,
                             calc_exploit,
+                            gpu_eval_ptr,
                         )
                     };
 
@@ -333,30 +336,30 @@ impl State {
                         average_strategy += utility;
                     }
                 }
-                if self.action == DealRiver {
-                    let eval_ptr = transfer_post_river_eval(evaluator, self.cards);
-                    let start = Instant::now();
-                    let gpu = evaluate_post_river_gpu(
-                        self.gpu_pointer.expect("Should have GPU pointer"),
-                        eval_ptr,
-                        opponent_range,
-                        updating_player,
-                    );
-                    for i in 0..1326 {
-                        //println!("{} {}", average_strategy[i], gpu[i]);
-                        assert_approx_eq!(average_strategy[i], gpu[i], 1e-4);
-                        // if (average_strategy[i] - gpu[i]).abs() > 1e-1 {
-                        //     dbg!(evaluator.u64_to_cards(self.cards));
-                        //     for j in 0..1326 {
-                        //         println!("{} {}", average_strategy[i], gpu[i]);
-                        //     }
-                        //     assert_approx_eq!(average_strategy[i], gpu[i], 1e-0);
-                        // }
-                    }
-                    free_eval(eval_ptr);
-                    //panic!("Once");
-                    //println!("COMPLETE {} micros", start.elapsed().as_micros());
-                }
+                // if self.action == DealRiver {
+                //     let eval_ptr = transfer_post_river_eval(evaluator, self.cards);
+                //     let start = Instant::now();
+                //     let gpu = evaluate_post_river_gpu(
+                //         self.gpu_pointer.expect("Should have GPU pointer"),
+                //         eval_ptr,
+                //         opponent_range,
+                //         updating_player,
+                //     );
+                //     for i in 0..1326 {
+                //         //println!("{} {}", average_strategy[i], gpu[i]);
+                //         assert_approx_eq!(average_strategy[i], gpu[i], 1e-4);
+                //         // if (average_strategy[i] - gpu[i]).abs() > 1e-1 {
+                //         //     dbg!(evaluator.u64_to_cards(self.cards));
+                //         //     for j in 0..1326 {
+                //         //         println!("{} {}", average_strategy[i], gpu[i]);
+                //         //     }
+                //         //     assert_approx_eq!(average_strategy[i], gpu[i], 1e-0);
+                //         // }
+                //     }
+                //     free_eval(eval_ptr);
+                //     //panic!("Once");
+                //     //println!("COMPLETE {} micros", start.elapsed().as_micros());
+                // }
                 // update strategy
                 if self.next_to_act == updating_player && !calc_exploit {
                     let mut update = [Vector::default(); 3];
@@ -377,11 +380,17 @@ impl State {
             Flop => {
                 let mut total = Vector::default();
                 for next_state in self.next_states.iter_mut() {
+                    let eval_ptr = transfer_flop_eval(evaluator, next_state.cards);
+                    println!("Transfer complete: {:?}", eval_ptr);
+                    free_eval(eval_ptr);
+                    panic!("Upload once");
+
                     let res = next_state.evaluate_state(
                         opponent_range,
                         evaluator,
                         updating_player,
                         calc_exploit,
+                        Some(eval_ptr),
                     );
                     for &permutation in &next_state.permutations {
                         total += permute(permutation, res)
@@ -397,6 +406,7 @@ impl State {
                         evaluator,
                         updating_player,
                         calc_exploit,
+                        gpu_eval_ptr,
                     );
                     total += res;
                 }
@@ -415,6 +425,7 @@ impl State {
                             evaluator,
                             updating_player,
                             calc_exploit,
+                            gpu_eval_ptr,
                         )
                     })
                     .collect::<Vec<_>>();

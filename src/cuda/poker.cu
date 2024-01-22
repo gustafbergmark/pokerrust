@@ -2,6 +2,7 @@
 #include <cuda_runtime.h>
 #include "math.h"
 #include "structs.h"
+#include "evaluator.cuh"
 // Everything expect a  dimension of 1x128, and vectors of size 1326 (most of the time)
 
 __device__ void multiply(DataType *v1, DataType *v2, DataType *res) {

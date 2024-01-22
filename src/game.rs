@@ -32,21 +32,21 @@ impl<'a> Game<'a> {
 
         let _ = self
             .root
-            .evaluate_state(&Vector::ones(), &self.evaluator, Small, false);
+            .evaluate_state(&Vector::ones(), &self.evaluator, Small, false, None);
 
         println!("SMALL DONE");
         let _ = self
             .root
-            .evaluate_state(&Vector::ones(), &self.evaluator, Big, false);
+            .evaluate_state(&Vector::ones(), &self.evaluator, Big, false, None);
         println!("BIG DONE");
         let iter_time = start.elapsed().as_secs_f32();
         if iter % 10 == 0 {
-            let exp_sb = self
-                .root
-                .evaluate_state(&Vector::ones(), &self.evaluator, Small, true);
-            let exp_bb = self
-                .root
-                .evaluate_state(&Vector::ones(), &self.evaluator, Big, true);
+            let exp_sb =
+                self.root
+                    .evaluate_state(&Vector::ones(), &self.evaluator, Small, true, None);
+            let exp_bb =
+                self.root
+                    .evaluate_state(&Vector::ones(), &self.evaluator, Big, true, None);
             println!(
                 "Iteration {} done \n\
                   Exploitability: {} mb/h \n\

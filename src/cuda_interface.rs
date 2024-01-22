@@ -1,3 +1,4 @@
+use crate::combination_map::CombinationMap;
 use crate::enums::Player;
 use crate::evaluator::Evaluator;
 use crate::vector::{Float, Vector};
@@ -26,7 +27,7 @@ extern "C" {
     );
 
     fn build_river_cuda(cards: u64, bet: Float) -> *const std::ffi::c_void;
-    fn transfer_post_river_eval_cuda(
+    fn transfer_flop_eval_cuda(
         card_order: *const u64,
         card_indexes: *const u16,
         eval: *const u16,
@@ -100,15 +101,38 @@ pub fn init_gpu() {
     unsafe { init() };
 }
 
-pub fn transfer_post_river_eval(eval: &Evaluator, communal_cards: u64) -> *const std::ffi::c_void {
-    unsafe {
-        transfer_post_river_eval_cuda(
+pub fn transfer_flop_eval(eval: &Evaluator, communal_cards: u64) -> *const std::ffi::c_void {
+    assert_eq!(communal_cards.count_ones(), 3);
+    let mut evals = vec![];
+    let mut collisions = vec![];
+    let mut cards = 3;
+    for i in 0..1326 {
+        if (communal_cards & cards) > 0 {
+            let mut e = vec![0; 1326 + 128 * 2];
+            evals.append(&mut e);
+            let mut c = vec![0; 52 * 51];
+            collisions.append(&mut c);
+        } else {
+            assert_eq!((communal_cards | cards).count_ones(), 5);
+            let mut e = eval.vectorized_eval(communal_cards | cards).clone();
+            evals.append(&mut e);
+            let mut c = eval.collisions(communal_cards | cards).clone();
+            collisions.append(&mut c);
+        }
+
+        cards = CombinationMap::<(), 52, 2>::next(cards);
+    }
+    assert_eq!(evals.len(), 1326 * (1326 + 128 * 2));
+    assert_eq!(collisions.len(), 1326 * 52 * 51);
+    let res = unsafe {
+        transfer_flop_eval_cuda(
             eval.card_order().as_ptr(),
             eval.card_indexes().as_ptr(),
-            eval.vectorized_eval(communal_cards).as_ptr(),
-            eval.collisions(communal_cards).as_ptr(),
+            evals.as_ptr(),
+            collisions.as_ptr(),
         )
-    }
+    };
+    return res;
 }
 
 pub fn free_eval(ptr: *const std::ffi::c_void) {

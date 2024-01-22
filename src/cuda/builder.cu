@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <cuda_runtime.h>
 #include "structs.h"
+#include "evaluator.cuh"
 
 
 __device__ int possible_actions(State *state, short raises, Action *result) {
@@ -184,25 +185,5 @@ State *build_river_cuda(long cards, DataType bet) {
     cudaFree(device_state_index);
     cudaFree(device_vector_index);
     return root;
-}
-Evaluator *transfer_post_river_eval_cuda(long *card_order, short *card_indexes, short *eval, short *coll_vec) {
-    cudaError_t err;
-    Evaluator *device_eval;
-    cudaMalloc(&device_eval, sizeof(Evaluator));
-    cudaMemcpy(&device_eval->card_order, card_order, 1326 * sizeof(long), cudaMemcpyHostToDevice);
-    cudaMemcpy(&device_eval->card_indexes, card_indexes, 52 * 51 * sizeof(short), cudaMemcpyHostToDevice);
-    cudaMemcpy(&device_eval->eval, eval, (1326 + 128 * 2) * sizeof(short), cudaMemcpyHostToDevice);
-    cudaMemcpy(&device_eval->coll_vec, coll_vec, 52 * 51 * sizeof(short), cudaMemcpyHostToDevice);
-
-    err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("Error: %s\n", cudaGetErrorString(err));
-        fflush(stdout);
-    }
-
-    return device_eval;
-}
-void free_eval_cuda(Evaluator *device_eval) {
-    cudaFree(device_eval);
 }
 }

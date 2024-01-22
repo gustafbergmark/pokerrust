@@ -41,10 +41,4 @@ struct State {
     State *next_states[48];
 };
 
-struct Evaluator {
-    long card_order[1326];
-    short card_indexes[52*51];
-    short eval[1326 + 128*2];
-    short coll_vec[52*51];
-};
 #endif //POKERRUST_STRUCTS_H
