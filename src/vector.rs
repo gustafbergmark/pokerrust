@@ -6,7 +6,7 @@ pub struct Vector {
     pub values: [Float; 1326],
 }
 
-pub(crate) type Float = f64;
+pub(crate) type Float = f32;
 
 impl Vector {
     pub fn from(v: &[Float]) -> Self {

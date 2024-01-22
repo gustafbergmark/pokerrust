@@ -5,7 +5,7 @@
 #ifndef POKERRUST_STRUCTS_H
 #define POKERRUST_STRUCTS_H
 
-#define DataType double
+#define DataType float
 
 enum TerminalState {
     NonTerminal,
