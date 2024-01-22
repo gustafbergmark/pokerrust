@@ -21,6 +21,7 @@ enum Action {
     Call,
     Raise,
     DealRiver,
+    DealTurn
 };
 
 // 0 = Small, 1 = Big

@@ -1,4 +1,4 @@
-use crate::cuda_interface::build_river;
+use crate::cuda_interface::build_post_turn;
 use crate::enums::Action;
 use crate::enums::Action::*;
 use crate::enums::Player::*;
@@ -46,9 +46,9 @@ fn build(state: &mut State, evaluator: &Evaluator, raises: u8) -> usize {
             state.add_action(next_state);
         }
     }
-    // if state.terminal == River {
+    // if state.action == DealTurn {
     //     let start = Instant::now();
-    //     build_river(state.cards, state.sbbet);
+    //     build_post_turn(state.cards, state.sbbet);
     //     dbg!(start.elapsed().as_micros());
     //     panic!("Build once");
     //     //sleep(Duration::from_millis(100));

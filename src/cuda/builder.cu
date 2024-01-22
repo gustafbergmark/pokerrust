@@ -32,6 +32,10 @@ __device__ int possible_actions(State *state, short raises, Action *result) {
             result[0] = Check;
             result[1] = Raise;
             return 2;
+        case DealTurn :
+            result[0] = Check;
+            result[1] = Raise;
+            return 2;
     }
 }
 
@@ -111,9 +115,9 @@ __device__ int build(State *state, short raises, State *root, DataType *vectors,
 }
 
 __global__ void
-build_river_kernel(long cards, DataType bet, State *root, DataType *vectors, int *state_index, int *vector_index) {
-    *root = {.terminal = River,
-            .action = Call,
+build_post_turn_kernel(long cards, DataType bet, State *root, DataType *vectors, int *state_index, int *vector_index) {
+    *root = {.terminal = NonTerminal,
+            .action = DealTurn,
             .cards = cards,
             .sbbet = bet,
             .bbbet = bet,
@@ -144,7 +148,7 @@ void init() {
     printf("new stack size: %zu\n", *size);
     fflush(stdout);
 }
-State *build_river_cuda(long cards, DataType bet) {
+State *build_post_turn_cuda(long cards, DataType bet) {
     cudaError_t err;
     int vector_index = 0;
     int state_index = 0;
@@ -157,10 +161,10 @@ State *build_river_cuda(long cards, DataType bet) {
     cudaMemcpy(device_vector_index, &vector_index, sizeof(int), cudaMemcpyHostToDevice);
 
     State *root;
-    cudaMalloc(&root, sizeof(State) * (27 * 48 + 1));
+    cudaMalloc(&root, sizeof(State) * (27 * 48 * 9 + 27) );
 
     DataType *vectors;
-    int vectors_size = sizeof(DataType) * 26 * 1326 * 48;
+    int vectors_size = sizeof(DataType) * 1326 * (26 * 48 * 9 + 26);
     cudaMalloc(&vectors, vectors_size);
     cudaMemset(vectors, 0, vectors_size);
     err = cudaGetLastError();
@@ -169,7 +173,7 @@ State *build_river_cuda(long cards, DataType bet) {
         fflush(stdout);
     }
 
-    build_river_kernel<<<1, 1>>>(cards, bet, root, vectors, device_state_index, device_vector_index);
+    build_post_turn_kernel<<<1, 1>>>(cards, bet, root, vectors, device_state_index, device_vector_index);
     cudaDeviceSynchronize();
     err = cudaGetLastError();
     if (err != cudaSuccess) {
