@@ -1,5 +1,5 @@
 use crate::cuda_interface::{
-    build_post_turn, evaluate_fold_gpu, evaluate_river_gpu, evaluate_showdown_gpu, free_eval,
+    build_post_turn, evaluate_fold_gpu, evaluate_post_turn_gpu, evaluate_showdown_gpu, free_eval,
     transfer_flop_eval,
 };
 use crate::enums::Action::*;
@@ -340,27 +340,27 @@ impl State {
                     }
                 }
                 if self.action == DealTurn {
-                    // let start = Instant::now();
-                    // let gpu = evaluate_post_turn_gpu(
-                    //     self.gpu_pointer.expect("GPU state pointer missing"),
-                    //     gpu_eval_ptr.expect("GPU eval pointer missing"),
-                    //     opponent_range,
-                    //     updating_player,
-                    // );
-                    // for i in 0..1326 {
-                    //     //println!("{} {}", average_strategy[i], gpu[i]);
-                    //     //assert_approx_eq!(res[i], gpu[i], 1e-4);
-                    //     if (res[i] - gpu[i]).abs() > 1e-4 {
-                    //         dbg!(self.cards);
-                    //         dbg!(evaluator.u64_to_cards(self.cards));
-                    //         for j in 0..1326 {
-                    //             println!("{} {}", res[i], gpu[i]);
-                    //         }
-                    //         assert_approx_eq!(res[i], gpu[i], 1e-4);
-                    //     }
-                    // }
-                    // panic!("Once");
-                    // println!("COMPLETE {} micros", start.elapsed().as_micros());
+                    let start = Instant::now();
+                    let gpu = evaluate_post_turn_gpu(
+                        self.gpu_pointer.expect("GPU state pointer missing"),
+                        gpu_eval_ptr.expect("GPU eval pointer missing"),
+                        opponent_range,
+                        updating_player,
+                    );
+                    for i in 0..1326 {
+                        //println!("{} {}", average_strategy[i], gpu[i]);
+                        //assert_approx_eq!(res[i], gpu[i], 1e-4);
+                        if (average_strategy[i] - gpu[i]).abs() > 1e-4 {
+                            dbg!(self.cards);
+                            dbg!(evaluator.u64_to_cards(self.cards));
+                            for j in 0..1326 {
+                                println!("{} {}", average_strategy[i], gpu[i]);
+                            }
+                            assert_approx_eq!(average_strategy[i], gpu[i], 1e-4);
+                        }
+                    }
+                    //panic!("Once");
+                    println!("COMPLETE {} micros", start.elapsed().as_micros());
                 }
                 // update strategy
                 if self.next_to_act == updating_player && !calc_exploit {

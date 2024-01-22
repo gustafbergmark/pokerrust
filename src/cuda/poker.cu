@@ -363,7 +363,7 @@ evaluate_fold_kernel(DataType *opponent_range, long communal_cards, long *card_o
                                folding_player, bet, result, range_sum, temp);
 }
 
-__device__ void evaluate_post_river_kernel_inner(DataType *opponent_range,
+__device__ void evaluate_post_turn_kernel_inner(DataType *opponent_range,
                                                  State *state,
                                                  Evaluator *evaluator,
                                                  Player updating_player,
@@ -413,7 +413,7 @@ __device__ void evaluate_post_river_kernel_inner(DataType *opponent_range,
                     multiply(opponent_range, action_prob, new_range);
                 }
                 __syncthreads();
-                evaluate_post_river_kernel_inner(new_range, next, evaluator, updating_player, scratch, new_result,
+                evaluate_post_turn_kernel_inner(new_range, next, evaluator, updating_player, scratch, new_result,
                                                  sorted_range, sorted_eval, temp);
                 __syncthreads();
                 if (updating_player == state->next_to_act) {
@@ -439,7 +439,7 @@ __device__ void evaluate_post_river_kernel_inner(DataType *opponent_range,
                 zero(new_result);
                 State *next = state->next_states[i];
                 __syncthreads();
-                evaluate_post_river_kernel_inner(opponent_range, next, evaluator, updating_player, scratch, new_result,
+                evaluate_post_turn_kernel_inner(opponent_range, next, evaluator, updating_player, scratch, new_result,
                                                  sorted_range, sorted_eval, temp);
                 __syncthreads();
                 add_assign(result, new_result);
@@ -456,7 +456,7 @@ __device__ void evaluate_post_river_kernel_inner(DataType *opponent_range,
     __syncthreads();
 }
 
-__global__ void evaluate_river_kernel(DataType *opponent_range,
+__global__ void evaluate_post_turn_kernel(DataType *opponent_range,
                                       State *state,
                                       Evaluator *evaluator,
                                       Player updating_player,
@@ -465,7 +465,7 @@ __global__ void evaluate_river_kernel(DataType *opponent_range,
     __shared__ DataType sorted_range[1327];
     __shared__ DataType sorted_eval[1326];
     __shared__ DataType temp[128];
-    evaluate_post_river_kernel_inner(opponent_range, state, evaluator, updating_player, scratch, result, sorted_range,
+    evaluate_post_turn_kernel_inner(opponent_range, state, evaluator, updating_player, scratch, result, sorted_range,
                                      sorted_eval, temp);
 }
 
@@ -542,7 +542,7 @@ void evaluate_fold_cuda(DataType *opponent_range, long communal_cards, long *car
     cudaFree(device_card_indexes);
 }
 
-void evaluate_river_cuda(DataType *opponent_range,
+void evaluate_post_turn_cuda(DataType *opponent_range,
                          State *state,
                          Evaluator *evaluator,
                          short updating_player,
@@ -561,7 +561,7 @@ void evaluate_river_cuda(DataType *opponent_range,
     cudaMalloc(&device_scratch, scratch_size);
     cudaMemset(device_scratch, 0, scratch_size);
 
-    evaluate_river_kernel<<<1, 128>>>(device_opponent_range, state, evaluator, updating_player == 0 ? Small : Big,
+    evaluate_post_turn_kernel<<<1, 128>>>(device_opponent_range, state, evaluator, updating_player == 0 ? Small : Big,
                                       device_scratch,
                                       device_result);
     cudaDeviceSynchronize();

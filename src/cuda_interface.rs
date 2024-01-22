@@ -37,7 +37,7 @@ extern "C" {
     ) -> *const std::ffi::c_void;
     fn free_eval_cuda(ptr: *const std::ffi::c_void);
 
-    fn evaluate_river_cuda(
+    fn evaluate_post_turn_cuda(
         opponent_range: *const Float,
         state: *const std::ffi::c_void,
         evaluator: *const std::ffi::c_void,
@@ -156,7 +156,7 @@ pub fn free_eval(ptr: *const std::ffi::c_void) {
     }
 }
 
-pub fn evaluate_river_gpu(
+pub fn evaluate_post_turn_gpu(
     state: *const std::ffi::c_void,
     evaluator: *const std::ffi::c_void,
     opponent_range: &Vector,
@@ -168,7 +168,7 @@ pub fn evaluate_river_gpu(
         Player::Big => 1,
     };
     unsafe {
-        evaluate_river_cuda(
+        evaluate_post_turn_cuda(
             opponent_range.values.as_ptr(),
             state,
             evaluator,
