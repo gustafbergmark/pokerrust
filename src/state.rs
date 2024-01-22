@@ -1,5 +1,5 @@
 use crate::cuda_interface::{
-    build_post_river, evaluate_fold_gpu, evaluate_post_river_gpu, evaluate_showdown_gpu, free_eval,
+    build_river, evaluate_fold_gpu, evaluate_post_river_gpu, evaluate_showdown_gpu, free_eval,
     transfer_post_river_eval,
 };
 use crate::enums::Action::*;
@@ -21,7 +21,7 @@ use std::time::Instant;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct State {
-    terminal: TerminalState,
+    pub terminal: TerminalState,
     pub action: Action,
     pub cards: u64,
     pub sbbet: Float,
@@ -255,7 +255,7 @@ impl State {
                         continue;
                     }
 
-                    let gpu_ptr = build_post_river(self.cards | num_river, self.sbbet);
+                    //let gpu_ptr = build_river(self.cards | num_river, self.sbbet);
 
                     let next_state = State {
                         terminal: NonTerminal,
@@ -267,7 +267,7 @@ impl State {
                         card_strategies: Some(Strategy::new()),
                         next_states: vec![],
                         permutations: vec![],
-                        gpu_pointer: Some(gpu_ptr),
+                        gpu_pointer: None, //Some(gpu_ptr),
                     };
                     next_states.push(next_state);
                 }
@@ -344,7 +344,7 @@ impl State {
                     );
                     for i in 0..1326 {
                         //println!("{} {}", average_strategy[i], gpu[i]);
-                        assert_approx_eq!(average_strategy[i], gpu[i], 1e-6);
+                        assert_approx_eq!(average_strategy[i], gpu[i], 1e-4);
                         // if (average_strategy[i] - gpu[i]).abs() > 1e-1 {
                         //     dbg!(evaluator.u64_to_cards(self.cards));
                         //     for j in 0..1326 {

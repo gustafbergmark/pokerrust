@@ -12,6 +12,7 @@ enum TerminalState {
     SBWins,
     BBWins,
     Showdown,
+    River,
 };
 
 enum Action {
@@ -36,8 +37,8 @@ struct State {
     DataType bbbet;
     Player next_to_act;
     short transitions;
-    DataType *card_strategies[3];
-    State *next_states[3];
+    DataType *card_strategies[48];
+    State *next_states[48];
 };
 
 struct Evaluator {

@@ -25,7 +25,7 @@ extern "C" {
         result: *mut Float,
     );
 
-    fn build_post_river_cuda(cards: u64, bet: Float) -> *const std::ffi::c_void;
+    fn build_river_cuda(cards: u64, bet: Float) -> *const std::ffi::c_void;
     fn transfer_post_river_eval_cuda(
         card_order: *const u64,
         card_indexes: *const u16,
@@ -91,8 +91,8 @@ pub fn evaluate_fold_gpu(
     result
 }
 
-pub fn build_post_river(cards: u64, bet: Float) -> *const std::ffi::c_void {
-    let ptr = unsafe { build_post_river_cuda(cards, bet) };
+pub fn build_river(cards: u64, bet: Float) -> *const std::ffi::c_void {
+    let ptr = unsafe { build_river_cuda(cards, bet) };
     ptr
 }
 

@@ -9,5 +9,7 @@ fn main() {
         .file("src/cuda/poker.cu")
         .file("src/cuda/builder.cu")
         .compile("poker");
-    println!("cargo:rerun-if-changed=src/cuda/*");
+    println!("cargo:rerun-if-changed=src/cuda/poker.cu");
+    println!("cargo:rerun-if-changed=src/cuda/builder.cu");
+    println!("cargo:rerun-if-changed=src/cuda/structs.h");
 }
