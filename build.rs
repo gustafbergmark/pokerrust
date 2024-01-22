@@ -13,4 +13,6 @@ fn main() {
     println!("cargo:rerun-if-changed=src/cuda/poker.cu");
     println!("cargo:rerun-if-changed=src/cuda/builder.cu");
     println!("cargo:rerun-if-changed=src/cuda/structs.h");
+    println!("cargo:rerun-if-changed=src/cuda/evaluator.cu");
+    println!("cargo:rerun-if-changed=src/cuda/evaluator.cuh");
 }

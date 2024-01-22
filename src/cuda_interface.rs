@@ -13,6 +13,7 @@ extern "C" {
         coll_vec: *const u16,
         bet: Float,
         result: *mut Float,
+        evaluator: *const std::ffi::c_void,
     );
 
     fn evaluate_fold_cuda(
@@ -28,6 +29,7 @@ extern "C" {
 
     fn build_river_cuda(cards: u64, bet: Float) -> *const std::ffi::c_void;
     fn transfer_flop_eval_cuda(
+        flop: u64,
         card_order: *const u64,
         card_indexes: *const u16,
         eval: *const u16,
@@ -35,15 +37,15 @@ extern "C" {
     ) -> *const std::ffi::c_void;
     fn free_eval_cuda(ptr: *const std::ffi::c_void);
 
-    fn evaluate_post_river_cuda(
+    fn evaluate_river_cuda(
         opponent_range: *const Float,
         state: *const std::ffi::c_void,
         evaluator: *const std::ffi::c_void,
         updating_player: u16,
         result: *mut Float,
     );
-}
 
+}
 pub fn evaluate_showdown_gpu(
     opponent_range: &Vector,
     communal_cards: u64,
@@ -51,6 +53,7 @@ pub fn evaluate_showdown_gpu(
     eval: &Vec<u16>,
     coll_vec: &Vec<u16>,
     bet: Float,
+    evaluator: *const std::ffi::c_void,
 ) -> Vector {
     let mut result = Vector::default();
     unsafe {
@@ -62,6 +65,7 @@ pub fn evaluate_showdown_gpu(
             coll_vec.as_ptr(),
             bet,
             result.values.as_mut_ptr(),
+            evaluator,
         );
     }
     result
@@ -122,10 +126,21 @@ pub fn transfer_flop_eval(eval: &Evaluator, communal_cards: u64) -> *const std::
 
         cards = CombinationMap::<(), 52, 2>::next(cards);
     }
+    for cards in eval.card_order() {
+        if *cards & communal_cards > 0 {
+            continue;
+        }
+        let index = CombinationMap::<(), 52, 2>::get_ordering_index(*cards);
+        assert_eq!(
+            eval.vectorized_eval(cards | communal_cards)[..],
+            evals[index * (1326 + 128 * 2)..(index + 1) * (1326 + 128 * 2)]
+        )
+    }
     assert_eq!(evals.len(), 1326 * (1326 + 128 * 2));
     assert_eq!(collisions.len(), 1326 * 52 * 51);
     let res = unsafe {
         transfer_flop_eval_cuda(
+            communal_cards,
             eval.card_order().as_ptr(),
             eval.card_indexes().as_ptr(),
             evals.as_ptr(),
@@ -141,7 +156,7 @@ pub fn free_eval(ptr: *const std::ffi::c_void) {
     }
 }
 
-pub fn evaluate_post_river_gpu(
+pub fn evaluate_river_gpu(
     state: *const std::ffi::c_void,
     evaluator: *const std::ffi::c_void,
     opponent_range: &Vector,
@@ -153,7 +168,7 @@ pub fn evaluate_post_river_gpu(
         Player::Big => 1,
     };
     unsafe {
-        evaluate_post_river_cuda(
+        evaluate_river_cuda(
             opponent_range.values.as_ptr(),
             state,
             evaluator,

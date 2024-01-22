@@ -17,14 +17,15 @@ __device__ int choose(int n, int k) {
     for (int i = 1; i <= k; i++) {
         div *= i;
     }
-    return res / div;
+    res /= div;
+    return res;
 }
 
 __device__ int get_index(long set) {
     int res = 0;
     int i = __ffsll(set)-1;
     res += choose(i, 1);
-    set ^= 1 << i;
+    set ^= 1l << i;
     i = __ffsll(set)-1;
     res += choose(i, 2);
     return res;
@@ -33,10 +34,11 @@ __device__ int get_index(long set) {
 
 
 extern "C" {
-Evaluator *transfer_flop_eval_cuda(long *card_order, short *card_indexes, short *eval, short *coll_vec) {
+Evaluator *transfer_flop_eval_cuda(long flop, long *card_order, short *card_indexes, short *eval, short *coll_vec) {
     cudaError_t err;
     Evaluator *device_eval;
     cudaMalloc(&device_eval, sizeof(Evaluator));
+    cudaMemcpy(&device_eval->flop, &flop, sizeof(long), cudaMemcpyHostToDevice);
     cudaMemcpy(&device_eval->card_order, card_order, 1326 * sizeof(long), cudaMemcpyHostToDevice);
     cudaMemcpy(&device_eval->card_indexes, card_indexes, 52 * 51 * sizeof(short), cudaMemcpyHostToDevice);
     cudaMemcpy(&device_eval->eval, eval, 1326 * (1326 + 128 * 2) * sizeof(short), cudaMemcpyHostToDevice);
@@ -52,4 +54,5 @@ Evaluator *transfer_flop_eval_cuda(long *card_order, short *card_indexes, short 
 void free_eval_cuda(Evaluator *device_eval) {
     cudaFree(device_eval);
 }
+
 }

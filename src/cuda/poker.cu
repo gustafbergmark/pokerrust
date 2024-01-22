@@ -134,7 +134,7 @@ __device__ void get_strategy(State *state, DataType *scratch, DataType *result) 
 __device__ void update_strategy(State *state, DataType *update) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     for (int i = 0; i < state->transitions; i++) {
-        add_assign(state->card_strategies[i], update + 1326*i);
+        add_assign(state->card_strategies[i], update + 1326 * i);
         for (int b = 0; b < 11; b++) {
             int index = tid * 11 + b;
             if (index < 1326) {
@@ -194,7 +194,8 @@ handle_collisions(int i, long communal_cards, long *card_order, short *eval, sho
 
 __device__ void
 evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, long *card_order, short *eval,
-                               short *coll_vec, DataType bet, DataType *result, DataType *sorted_range, DataType *sorted_eval,
+                               short *coll_vec, DataType bet, DataType *result, DataType *sorted_range,
+                               DataType *sorted_eval,
                                DataType *temp) {
     __syncthreads();
     // Setup
@@ -270,17 +271,31 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, lo
 
 __global__ void
 evaluate_showdown_kernel(DataType *opponent_range, long communal_cards, long *card_order, short *eval,
-                         short *coll_vec, DataType bet, DataType *result) {
+                         short *coll_vec, DataType bet, DataType *result, Evaluator *evaluator) {
     __shared__ DataType sorted_range[1327];
     __shared__ DataType sorted_eval[1326];
     __shared__ DataType temp[128];
+    long set = communal_cards ^ evaluator->flop;
+    int eval_index = get_index(set);
+    short *new_eval = evaluator->eval + eval_index * (1326 + 128 * 2);
+    short *new_coll_vec = evaluator->coll_vec + eval_index * 52 * 51;
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid == 0) {
+        for (int i = 0; i < 1326 + 128 * 2; i++) {
+            if (new_eval[i] != eval[i]) {
+                printf("Error cards %lu %d\n", communal_cards, __popcll(set));
+                break;
+            }
+        }
+    }
     evaluate_showdown_kernel_inner(opponent_range, communal_cards, card_order, eval, coll_vec, bet, result,
                                    sorted_range, sorted_eval, temp);
 }
 
 __device__ void
 evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, long *card_order, short *card_indexes,
-                           short updating_player, short folding_player, DataType bet, DataType *result, DataType *range_sum,
+                           short updating_player, short folding_player, DataType bet, DataType *result,
+                           DataType *range_sum,
                            DataType *temp) {
     __syncthreads();
     // Setup
@@ -353,14 +368,21 @@ __device__ void evaluate_post_river_kernel_inner(DataType *opponent_range,
                                                  Evaluator *evaluator,
                                                  Player updating_player,
                                                  DataType *scratch,
-                                                 DataType *result, DataType *sorted_range, DataType *sorted_eval, DataType *temp) {
+                                                 DataType *result, DataType *sorted_range, DataType *sorted_eval,
+                                                 DataType *temp) {
     __syncthreads();
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
     switch (state->terminal) {
-        case Showdown :
-            evaluate_showdown_kernel_inner(opponent_range, state->cards, evaluator->card_order, evaluator->eval,
-                                           evaluator->coll_vec, state->sbbet, result, sorted_range, sorted_eval, temp);
+        case Showdown : {
+            long set = state->cards ^ evaluator->flop;
+            int eval_index = get_index(set);
+            short *eval = evaluator->eval + eval_index * (1326 + 128 * 2);
+            short *coll_vec = evaluator->coll_vec + eval_index * 52 * 51;
+            evaluate_showdown_kernel_inner(opponent_range, state->cards, evaluator->card_order, eval,
+                                           coll_vec, state->sbbet, result, sorted_range, sorted_eval, temp);
+
+        }
             break;
         case SBWins :
             evaluate_fold_kernel_inner(opponent_range, state->cards, evaluator->card_order, evaluator->card_indexes,
@@ -370,7 +392,7 @@ __device__ void evaluate_post_river_kernel_inner(DataType *opponent_range,
             evaluate_fold_kernel_inner(opponent_range, state->cards, evaluator->card_order, evaluator->card_indexes,
                                        updating_player, 0, state->sbbet, result, sorted_eval, temp);
             break;
-        case NonTerminal :
+        case NonTerminal : {
             DataType *average_strategy = result;
             zero(average_strategy);
             DataType *action_probs = scratch;
@@ -407,18 +429,39 @@ __device__ void evaluate_post_river_kernel_inner(DataType *opponent_range,
                 }
                 update_strategy(state, results);
             }
-
+        }
+            break;
+        case River:
+            zero(result);
+            DataType *new_result = scratch;
+            scratch += 1326;
+            for (int i = 0; i < state->transitions; i++) {
+                zero(new_result);
+                State *next = state->next_states[i];
+                __syncthreads();
+                evaluate_post_river_kernel_inner(opponent_range, next, evaluator, updating_player, scratch, new_result,
+                                                 sorted_range, sorted_eval, temp);
+                __syncthreads();
+                add_assign(result, new_result);
+            }
+            __syncthreads();
+            for (int b = 0; b < 11; b++) {
+                int index = tid * 11 + b;
+                if (index < 1326) {
+                    result[index] /= ((DataType) state->transitions);
+                }
+            }
             break;
     }
     __syncthreads();
 }
 
-__global__ void evaluate_post_river_kernel(DataType *opponent_range,
-                                           State *state,
-                                           Evaluator *evaluator,
-                                           Player updating_player,
-                                           DataType *scratch,
-                                           DataType *result) {
+__global__ void evaluate_river_kernel(DataType *opponent_range,
+                                      State *state,
+                                      Evaluator *evaluator,
+                                      Player updating_player,
+                                      DataType *scratch,
+                                      DataType *result) {
     __shared__ DataType sorted_range[1327];
     __shared__ DataType sorted_eval[1326];
     __shared__ DataType temp[128];
@@ -429,7 +472,7 @@ __global__ void evaluate_post_river_kernel(DataType *opponent_range,
 
 extern "C" {
 void evaluate_showdown_cuda(DataType *opponent_range, long communal_cards, long *card_order, short *eval,
-                            short *coll_vec, DataType bet, DataType *result) {
+                            short *coll_vec, DataType bet, DataType *result, Evaluator *evaluator) {
     DataType *device_opponent_range;
     cudaMalloc(&device_opponent_range, 1326 * sizeof(DataType));
     cudaMemcpy(device_opponent_range, opponent_range, 1326 * sizeof(DataType), cudaMemcpyHostToDevice);
@@ -450,11 +493,12 @@ void evaluate_showdown_cuda(DataType *opponent_range, long communal_cards, long 
     cudaMemcpy(device_coll_vec, coll_vec, 52 * 51 * sizeof(short), cudaMemcpyHostToDevice);
 
     evaluate_showdown_kernel<<<1, 128>>>(device_opponent_range, communal_cards, device_card_order, device_eval,
-                                         device_coll_vec, bet, device_result);
+                                         device_coll_vec, bet, device_result, evaluator);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess)
         printf("Error: %s\n", cudaGetErrorString(err));
     cudaDeviceSynchronize();
+    fflush(stdout);
     cudaMemcpy(result, device_result, 1326 * sizeof(DataType), cudaMemcpyDeviceToHost);
 
     cudaFree(device_opponent_range);
@@ -498,11 +542,11 @@ void evaluate_fold_cuda(DataType *opponent_range, long communal_cards, long *car
     cudaFree(device_card_indexes);
 }
 
-void evaluate_post_river_cuda(DataType *opponent_range,
-                              State *state,
-                              Evaluator *evaluator,
-                              short updating_player,
-                              DataType *result) {
+void evaluate_river_cuda(DataType *opponent_range,
+                         State *state,
+                         Evaluator *evaluator,
+                         short updating_player,
+                         DataType *result) {
     DataType *device_opponent_range;
     cudaMalloc(&device_opponent_range, 1326 * sizeof(DataType));
     cudaMemcpy(device_opponent_range, opponent_range, 1326 * sizeof(DataType), cudaMemcpyHostToDevice);
@@ -511,20 +555,22 @@ void evaluate_post_river_cuda(DataType *opponent_range,
     cudaMalloc(&device_result, 1326 * sizeof(DataType));
 
     DataType *device_scratch;
-    int scratch_size = 1326 * sizeof(DataType) * 7 *
-                       6; // Max 7 ( 3 results, 3 action probs, 1 new_probs) vectors per level, max depth of 6
+    int scratch_size = 1326 * sizeof(DataType) * (7 *
+                                                  6 +
+                                                  10); // Max 7 ( 3 results, 3 action probs, 1 new_probs) vectors per level, max depth of 6 and 1 for river
     cudaMalloc(&device_scratch, scratch_size);
     cudaMemset(device_scratch, 0, scratch_size);
 
-    evaluate_post_river_kernel<<<1, 128>>>(device_opponent_range, state, evaluator, updating_player == 0 ? Small : Big, device_scratch,
-                                           device_result);
-
+    evaluate_river_kernel<<<1, 128>>>(device_opponent_range, state, evaluator, updating_player == 0 ? Small : Big,
+                                      device_scratch,
+                                      device_result);
+    cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         printf("Error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
     }
-    cudaDeviceSynchronize();
+    fflush(stdout);
     cudaMemcpy(result, device_result, 1326 * sizeof(DataType), cudaMemcpyDeviceToHost);
 
     cudaFree(device_opponent_range);

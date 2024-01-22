@@ -133,7 +133,7 @@ void init() {
     printf("old heap size: %zu\n", *size);
     cudaDeviceGetLimit(size, cudaLimitStackSize);
     printf("old stack size: %zu\n", *size);
-    // Allocate 6 GiBi heap
+    // Allocate 8 GiBi heap
     size_t heap_size = 8l * 1024l * 1024l * 1024l;
     cudaDeviceSetLimit(cudaLimitMallocHeapSize, heap_size);
     // Too small stack will result in: unspecified launch failure
@@ -177,10 +177,10 @@ State *build_river_cuda(long cards, DataType bet) {
         fflush(stdout);
     }
 
-    cudaMemcpy(&state_index, device_state_index, sizeof(int), cudaMemcpyDeviceToHost);
-    cudaMemcpy(&vector_index, device_vector_index, sizeof(int), cudaMemcpyDeviceToHost);
-    printf("pointer: %p state_index: %d vector_index: %d\n", root, state_index, vector_index);
-    fflush(stdout);
+//    cudaMemcpy(&state_index, device_state_index, sizeof(int), cudaMemcpyDeviceToHost);
+//    cudaMemcpy(&vector_index, device_vector_index, sizeof(int), cudaMemcpyDeviceToHost);
+//    printf("pointer: %p state_index: %d vector_index: %d\n", root, state_index, vector_index);
+//    fflush(stdout);
 
     cudaFree(device_state_index);
     cudaFree(device_vector_index);
