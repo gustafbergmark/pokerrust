@@ -8,7 +8,7 @@
 __device__ void multiply(DataType *v1, DataType *v2, DataType *res) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     for (int b = 0; b < 11; b++) {
-        int index = i * 11 + b;
+        int index = i + 128 * b;
         if (index < 1326) {
             res[index] = v1[index] * v2[index];
         }
@@ -19,7 +19,7 @@ __device__ void multiply(DataType *v1, DataType *v2, DataType *res) {
 __device__ void fma(DataType *v1, DataType *v2, DataType *res) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     for (int b = 0; b < 11; b++) {
-        int index = i * 11 + b;
+        int index = i + 128 * b;
         if (index < 1326) {
             res[index] += v1[index] * v2[index];
         }
@@ -30,7 +30,7 @@ __device__ void fma(DataType *v1, DataType *v2, DataType *res) {
 __device__ void add_assign(DataType *v1, DataType *v2) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     for (int b = 0; b < 11; b++) {
-        int index = i * 11 + b;
+        int index = i + 128 * b;
         if (index < 1326) {
             v1[index] += v2[index];
         }
@@ -41,7 +41,7 @@ __device__ void add_assign(DataType *v1, DataType *v2) {
 __device__ void sub_assign(DataType *v1, DataType *v2) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     for (int b = 0; b < 11; b++) {
-        int index = i * 11 + b;
+        int index = i + 128 * b;
         if (index < 1326) {
             v1[index] -= v2[index];
         }
@@ -53,7 +53,7 @@ __device__ void sub_assign(DataType *v1, DataType *v2) {
 __device__ void zero(DataType *v) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     for (int b = 0; b < 11; b++) {
-        int index = i * 11 + b;
+        int index = i + 128 * b;
         if (index < 1326) {
             v[index] = 0;
         }
@@ -93,8 +93,9 @@ __device__ void cuda_prefix_sum(DataType *input, DataType *temp) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     temp[i] = 0;
     for (int b = 0; b < 11; b++) {
-        if (i * 11 + b < 1326 && i < 127) {
-            temp[i] += input[i * 11 + b];
+        int index = i * 11 + b;
+        if (index < 1326 && i < 127) {
+            temp[i] += input[index];
         }
     }
     __syncthreads();
@@ -102,9 +103,10 @@ __device__ void cuda_prefix_sum(DataType *input, DataType *temp) {
 
     DataType prefix = temp[i];
     for (int b = 0; b < 11; b++) {
-        if (i * 11 + b < 1326) {
-            DataType t = input[i * 11 + b];
-            input[i * 11 + b] = prefix;
+        int index = i * 11+b;
+        if (index < 1326) {
+            DataType t = input[index];
+            input[index] = prefix;
             prefix += t;
         }
     }
@@ -119,7 +121,7 @@ __device__ void get_strategy(State *state, DataType *scratch, DataType *result) 
     }
     for (int i = 0; i < state->transitions; i++) {
         for (int b = 0; b < 11; b++) {
-            int index = tid * 11 + b;
+            int index = tid + 128* b;
             if (index < 1326) {
                 if (sum[index] <= 1e-6) {
                     result[index + i * 1326] = 1.0 / ((DataType) state->transitions);
@@ -136,7 +138,7 @@ __device__ void update_strategy(State *state, DataType *update) {
     for (int i = 0; i < state->transitions; i++) {
         add_assign(state->card_strategies[i], update + 1326 * i);
         for (int b = 0; b < 11; b++) {
-            int index = tid * 11 + b;
+            int index = tid + 128 * b;
             if (index < 1326) {
                 state->card_strategies[i][index] = max(state->card_strategies[i][index], 0.0);
             }
@@ -203,7 +205,7 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, lo
 
     // Sort hands by eval
     for (int b = 0; b < 11; b++) {
-        int index = i * 11 + b;
+        int index = i + 128* b;
         if (index < 1326) {
             // reset values
             sorted_range[index] = 0;
@@ -261,7 +263,7 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, lo
     // Write result
     __syncthreads();
     for (int b = 0; b < 11; b++) {
-        int index = i * 11 + b;
+        int index = i + 128 * b;
         if (index < 1326) {
             result[eval[index] & 2047] = sorted_eval[index] * bet;
         }
@@ -275,19 +277,6 @@ evaluate_showdown_kernel(DataType *opponent_range, long communal_cards, long *ca
     __shared__ DataType sorted_range[1327];
     __shared__ DataType sorted_eval[1326];
     __shared__ DataType temp[128];
-    long set = communal_cards ^ evaluator->flop;
-    int eval_index = get_index(set);
-    short *new_eval = evaluator->eval + eval_index * (1326 + 128 * 2);
-    short *new_coll_vec = evaluator->coll_vec + eval_index * 52 * 51;
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid == 0) {
-        for (int i = 0; i < 1326 + 128 * 2; i++) {
-            if (new_eval[i] != eval[i]) {
-                printf("Error cards %lu %d\n", communal_cards, __popcll(set));
-                break;
-            }
-        }
-    }
     evaluate_showdown_kernel_inner(opponent_range, communal_cards, card_order, eval, coll_vec, bet, result,
                                    sorted_range, sorted_eval, temp);
 }
@@ -302,7 +291,7 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, long *
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     for (int b = 0; b < 11; b++) {
-        int index = i * 11 + b;
+        int index = i + 128* b;
         if (index < 1326) {
             // reset values
             range_sum[index] = 0;
@@ -340,7 +329,7 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, long *
     __syncthreads();
 
     for (int b = 0; b < 11; b++) {
-        int index = i * 11 + b;
+        int index = i + 128* b;
         if (index < 1326) {
             if (communal_cards & card_order[index]) continue;
             result[index] += total;
@@ -446,7 +435,7 @@ __device__ void evaluate_post_turn_kernel_inner(DataType *opponent_range,
             }
             __syncthreads();
             for (int b = 0; b < 11; b++) {
-                int index = tid * 11 + b;
+                int index = tid + 128 * b;
                 if (index < 1326) {
                     result[index] /= ((DataType) state->transitions);
                 }
