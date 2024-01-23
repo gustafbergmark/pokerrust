@@ -13,7 +13,6 @@ __device__ void multiply(DataType *v1, DataType *v2, DataType *res) {
             res[index] = v1[index] * v2[index];
         }
     }
-    __syncthreads();
 }
 
 __device__ void fma(DataType *v1, DataType *v2, DataType *res) {
@@ -24,7 +23,6 @@ __device__ void fma(DataType *v1, DataType *v2, DataType *res) {
             res[index] += v1[index] * v2[index];
         }
     }
-    __syncthreads();
 }
 
 __device__ void add_assign(DataType *v1, DataType *v2) {
@@ -35,7 +33,6 @@ __device__ void add_assign(DataType *v1, DataType *v2) {
             v1[index] += v2[index];
         }
     }
-    __syncthreads();
 }
 
 __device__ void sub_assign(DataType *v1, DataType *v2) {
@@ -46,7 +43,6 @@ __device__ void sub_assign(DataType *v1, DataType *v2) {
             v1[index] -= v2[index];
         }
     }
-    __syncthreads();
 }
 
 
@@ -58,7 +54,6 @@ __device__ void zero(DataType *v) {
             v[index] = 0;
         }
     }
-    __syncthreads();
 }
 
 __device__ void p_sum(DataType *input, int i) {
@@ -90,6 +85,7 @@ __device__ void p_sum(DataType *input, int i) {
 }
 
 __device__ void cuda_prefix_sum(DataType *input, DataType *temp) {
+    __syncthreads();
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     temp[i] = 0;
     for (int b = 0; b < 11; b++) {
@@ -98,7 +94,6 @@ __device__ void cuda_prefix_sum(DataType *input, DataType *temp) {
             temp[i] += input[index];
         }
     }
-    __syncthreads();
     p_sum(temp, i);
 
     DataType prefix = temp[i];
@@ -110,6 +105,7 @@ __device__ void cuda_prefix_sum(DataType *input, DataType *temp) {
             prefix += t;
         }
     }
+    __syncthreads();
 }
 
 __device__ void get_strategy(State *state, DataType *scratch, DataType *result) {
@@ -149,6 +145,7 @@ __device__ void update_strategy(State *state, DataType *update) {
 __device__ void
 handle_collisions(int i, long communal_cards, long *card_order, short *eval, short *coll_vec,
                   DataType *sorted_range, DataType *sorted_eval) {
+    __syncthreads();
     // Handle collisions before prefix sum consumes sorted_range
     // First two warps handles forward direction
     if (i < 52) {
@@ -219,16 +216,12 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, lo
             sorted_range[index] = 0;
         }
     }
-    __syncthreads();
 
     // Handle card collisions
     handle_collisions(i, communal_cards, card_order, eval, coll_vec, sorted_range, sorted_eval);
 
-    __syncthreads();
-
     // Calculate prefix sum
     cuda_prefix_sum(sorted_range, temp);
-    __syncthreads();
     if (i == 0) {
         sorted_range[1326] = sorted_range[1325] + opponent_range[eval[1325] & 2047];
     }
@@ -304,12 +297,10 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, long *
             result[index] = opponent_range[index];
         }
     }
-    __syncthreads();
 
     // Calculate prefix sum
     cuda_prefix_sum(range_sum, temp);
 
-    __syncthreads();
     // using result[1325] is a bit hacky, but correct
     DataType total = range_sum[1325] + result[1325];
 
@@ -340,7 +331,6 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, long *
             }
         }
     }
-    __syncthreads();
 }
 
 __global__ void
@@ -359,7 +349,6 @@ __device__ void evaluate_post_turn_kernel_inner(DataType *opponent_range,
                                                  DataType *scratch,
                                                  DataType *result, DataType *sorted_range, DataType *sorted_eval,
                                                  DataType *temp) {
-    __syncthreads();
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
     switch (state->terminal) {
@@ -401,10 +390,8 @@ __device__ void evaluate_post_turn_kernel_inner(DataType *opponent_range,
                     scratch += 1326; // + 1
                     multiply(opponent_range, action_prob, new_range);
                 }
-                __syncthreads();
                 evaluate_post_turn_kernel_inner(new_range, next, evaluator, updating_player, scratch, new_result,
                                                  sorted_range, sorted_eval, temp);
-                __syncthreads();
                 if (updating_player == state->next_to_act) {
                     fma(new_result, action_prob, average_strategy);
                 } else {
@@ -427,13 +414,10 @@ __device__ void evaluate_post_turn_kernel_inner(DataType *opponent_range,
             for (int i = 0; i < state->transitions; i++) {
                 zero(new_result);
                 State *next = state->next_states[i];
-                __syncthreads();
                 evaluate_post_turn_kernel_inner(opponent_range, next, evaluator, updating_player, scratch, new_result,
                                                  sorted_range, sorted_eval, temp);
-                __syncthreads();
                 add_assign(result, new_result);
             }
-            __syncthreads();
             for (int b = 0; b < 11; b++) {
                 int index = tid + 128 * b;
                 if (index < 1326) {
@@ -442,7 +426,6 @@ __device__ void evaluate_post_turn_kernel_inner(DataType *opponent_range,
             }
             break;
     }
-    __syncthreads();
 }
 
 __global__ void evaluate_post_turn_kernel(DataType *opponent_range,
