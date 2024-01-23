@@ -45,6 +45,16 @@ __device__ void sub_assign(DataType *v1, DataType *v2) {
     }
 }
 
+__device__ void copy(DataType *from, DataType *into) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    for (int b = 0; b < 11; b++) {
+        int index = i + 128 * b;
+        if (index < 1326) {
+            into[index] = from[index];
+        }
+    }
+}
+
 
 __device__ void zero(DataType *v) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -98,7 +108,7 @@ __device__ void cuda_prefix_sum(DataType *input, DataType *temp) {
 
     DataType prefix = temp[i];
     for (int b = 0; b < 11; b++) {
-        int index = i * 11+b;
+        int index = i * 11 + b;
         if (index < 1326) {
             DataType t = input[index];
             input[index] = prefix;
@@ -117,7 +127,7 @@ __device__ void get_strategy(State *state, DataType *scratch, DataType *result) 
     }
     for (int i = 0; i < state->transitions; i++) {
         for (int b = 0; b < 11; b++) {
-            int index = tid + 128* b;
+            int index = tid + 128 * b;
             if (index < 1326) {
                 if (sum[index] <= 1e-4) {
                     result[index + i * 1326] = 1.0 / ((DataType) state->transitions);
@@ -202,7 +212,7 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, lo
 
     // Sort hands by eval
     for (int b = 0; b < 11; b++) {
-        int index = i + 128* b;
+        int index = i + 128 * b;
         if (index < 1326) {
             // reset values
             sorted_range[index] = 0;
@@ -284,7 +294,7 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, long *
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     for (int b = 0; b < 11; b++) {
-        int index = i + 128* b;
+        int index = i + 128 * b;
         if (index < 1326) {
             // reset values
             range_sum[index] = 0;
@@ -320,7 +330,7 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, long *
     __syncthreads();
 
     for (int b = 0; b < 11; b++) {
-        int index = i + 128* b;
+        int index = i + 128 * b;
         if (index < 1326) {
             if (communal_cards & card_order[index]) continue;
             result[index] += total;
@@ -342,103 +352,130 @@ evaluate_fold_kernel(DataType *opponent_range, long communal_cards, long *card_o
                                folding_player, bet, result, range_sum, temp);
 }
 
-__device__ void evaluate_post_turn_kernel_inner(DataType *opponent_range,
-                                                 State *state,
-                                                 Evaluator *evaluator,
-                                                 Player updating_player,
-                                                 DataType *scratch,
-                                                 DataType *result, DataType *sorted_range, DataType *sorted_eval,
-                                                 DataType *temp) {
+__device__ void evaluate_post_turn_kernel_inner(DataType *opponent_range_root,
+                                                State *root_state,
+                                                Evaluator *evaluator,
+                                                Player updating_player,
+                                                DataType *scratch_root, DataType *sorted_range, DataType *sorted_eval,
+                                                DataType *temp) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    Context contexts[14];
+    contexts[0] = {root_state, opponent_range_root,0};
+    int depth = 0;
 
-    switch (state->terminal) {
-        case Showdown : {
-            long set = state->cards ^ evaluator->flop;
-            int eval_index = get_index(set);
-            short *eval = evaluator->eval + eval_index * (1326 + 128 * 2);
-            short *coll_vec = evaluator->coll_vec + eval_index * 52 * 51;
-            evaluate_showdown_kernel_inner(opponent_range, state->cards, evaluator->card_order, eval,
-                                           coll_vec, state->sbbet, result, sorted_range, sorted_eval, temp);
+    while (depth >= 0) {
+        //if(tid==0) printf("depth %d\n", depth);
+        DataType *scratch = scratch_root + 1326 * depth * 10;
+        Context* context = &contexts[depth];
+        State* state = context->state;
+        DataType* opponent_range = context->opponent_range;
+        switch (state->terminal) {
+            case Showdown : {
+                long set = state->cards ^ evaluator->flop;
+                int eval_index = get_index(set);
+                short *eval = evaluator->eval + eval_index * (1326 + 128 * 2);
+                short *coll_vec = evaluator->coll_vec + eval_index * 52 * 51;
+                evaluate_showdown_kernel_inner(opponent_range, state->cards, evaluator->card_order, eval,
+                                               coll_vec, state->sbbet, scratch, sorted_range, sorted_eval, temp);
+                depth--;
+            }
+                break;
+            case SBWins :
+                evaluate_fold_kernel_inner(opponent_range, state->cards, evaluator->card_order, evaluator->card_indexes,
+                                           updating_player, 1, state->bbbet, scratch, sorted_eval, temp);
+                depth--;
+                break;
+            case BBWins :
+                evaluate_fold_kernel_inner(opponent_range, state->cards, evaluator->card_order, evaluator->card_indexes,
+                                           updating_player, 0, state->sbbet, scratch, sorted_eval, temp);
+                depth--;
+                break;
+            case NonTerminal : {
+                DataType *average_strategy = scratch;
+                scratch += 1326;
+                DataType *action_probs = scratch;
+                scratch += 1326 * state->transitions; // + state->transitions
+                DataType *results = scratch;
+                scratch += 1326 * state->transitions; // + state-> transitions
+                if (context->transition == 0) {
+                    zero(average_strategy);
+                    get_strategy(state, scratch, action_probs);
+                } else {
+                    int i = context->transition - 1;
+                    DataType* new_result = average_strategy + 1326*10;
+                    copy(new_result, results + 1326*i);
+                    if (updating_player == state->next_to_act) {
+                        fma(results + 1326*i, action_probs + 1326* i, average_strategy);
+                    } else {
+                        add_assign(average_strategy, results + 1326*i);
+                    }
+                }
 
-        }
-            break;
-        case SBWins :
-            evaluate_fold_kernel_inner(opponent_range, state->cards, evaluator->card_order, evaluator->card_indexes,
-                                       updating_player, 1, state->bbbet, result, sorted_eval, temp);
-            break;
-        case BBWins :
-            evaluate_fold_kernel_inner(opponent_range, state->cards, evaluator->card_order, evaluator->card_indexes,
-                                       updating_player, 0, state->sbbet, result, sorted_eval, temp);
-            break;
-        case NonTerminal : {
-            DataType *average_strategy = result;
-            zero(average_strategy);
-            DataType *action_probs = scratch;
-            scratch += 1326 * state->transitions; // + state->transitions
-            get_strategy(state, scratch, action_probs);
-            DataType *results = scratch;
-            scratch += 1326 * state->transitions; // + state-> transitions
-            for (int i = 0; i < state->transitions; i++) {
-                DataType *new_result = results + 1326 * i;
-                DataType *action_prob = action_probs + 1326 * i;
-                State *next = state->next_states[i];
-                DataType *new_range;
-                if (state->next_to_act == updating_player) {
-                    new_range = opponent_range;
+                if (context->transition == context->state->transitions) {
+                    if (state->next_to_act == updating_player) {
+                        for (int i = 0; i < state->transitions; i++) {
+                            DataType *util = results + 1326 * i;
+                            sub_assign(util, average_strategy);
+                        }
+                        update_strategy(state, results);
+                    }
+                    depth--;
                 } else {
-                    new_range = scratch;
-                    scratch += 1326; // + 1
-                    multiply(opponent_range, action_prob, new_range);
+                    int i = context->transition;
+                    State *next = context->state->next_states[i];
+                    DataType *new_range;
+                    if (state->next_to_act == updating_player) {
+                        new_range = opponent_range;
+                    } else {
+                        new_range = scratch;
+                        scratch += 1326; // + 1
+                        multiply(opponent_range, action_probs + 1326*i, new_range);
+                    }
+                    contexts[depth+1] = {next, new_range, 0};
+                    context->transition++;
+                    depth++;
                 }
-                evaluate_post_turn_kernel_inner(new_range, next, evaluator, updating_player, scratch, new_result,
-                                                 sorted_range, sorted_eval, temp);
-                if (updating_player == state->next_to_act) {
-                    fma(new_result, action_prob, average_strategy);
+                break;
+            }
+            case River:
+                DataType *result = scratch;
+                scratch += 1326;
+                if (context->transition == 0) {
+                    zero(result);
                 } else {
-                    add_assign(average_strategy, new_result);
+                    // offset to next depths result
+                    add_assign(result, result + 1326*10);
                 }
-            }
-            if (state->next_to_act == updating_player) {
-                for (int i = 0; i < state->transitions; i++) {
-                    DataType *util = results + 1326 * i;
-                    sub_assign(util, average_strategy);
+                if (context->transition == context->state->transitions) {
+                    for (int b = 0; b < 11; b++) {
+                        int index = tid + 128 * b;
+                        if (index < 1326) {
+                            result[index] /= ((DataType) state->transitions);
+                        }
+                    }
+                    depth--;
+                } else {
+                    int i = context->transition;
+                    State *next = state->next_states[i];
+                    contexts[depth+1] = {next, opponent_range, 0};
+                    context->transition+=1;
+                    depth++;
                 }
-                update_strategy(state, results);
-            }
+                break;
         }
-            break;
-        case River:
-            zero(result);
-            DataType *new_result = scratch;
-            scratch += 1326;
-            for (int i = 0; i < state->transitions; i++) {
-                zero(new_result);
-                State *next = state->next_states[i];
-                evaluate_post_turn_kernel_inner(opponent_range, next, evaluator, updating_player, scratch, new_result,
-                                                 sorted_range, sorted_eval, temp);
-                add_assign(result, new_result);
-            }
-            for (int b = 0; b < 11; b++) {
-                int index = tid + 128 * b;
-                if (index < 1326) {
-                    result[index] /= ((DataType) state->transitions);
-                }
-            }
-            break;
     }
 }
 
 __global__ void evaluate_post_turn_kernel(DataType *opponent_range,
-                                      State *state,
-                                      Evaluator *evaluator,
-                                      Player updating_player,
-                                      DataType *scratch,
-                                      DataType *result) {
+                                          State *state,
+                                          Evaluator *evaluator,
+                                          Player updating_player,
+                                          DataType *scratch) {
     __shared__ DataType sorted_range[1327];
     __shared__ DataType sorted_eval[1326];
     __shared__ DataType temp[128];
-    evaluate_post_turn_kernel_inner(opponent_range, state, evaluator, updating_player, scratch, result, sorted_range,
-                                     sorted_eval, temp);
+    evaluate_post_turn_kernel_inner(opponent_range, state, evaluator, updating_player, scratch, sorted_range,
+                                    sorted_eval, temp);
 }
 
 
@@ -515,27 +552,23 @@ void evaluate_fold_cuda(DataType *opponent_range, long communal_cards, long *car
 }
 
 void evaluate_post_turn_cuda(DataType *opponent_range,
-                         State *state,
-                         Evaluator *evaluator,
-                         short updating_player,
-                         DataType *result) {
+                             State *state,
+                             Evaluator *evaluator,
+                             short updating_player,
+                             DataType *result) {
     DataType *device_opponent_range;
     cudaMalloc(&device_opponent_range, 1326 * sizeof(DataType));
     cudaMemcpy(device_opponent_range, opponent_range, 1326 * sizeof(DataType), cudaMemcpyHostToDevice);
 
-    DataType *device_result;
-    cudaMalloc(&device_result, 1326 * sizeof(DataType));
 
     DataType *device_scratch;
-    int scratch_size = 1326 * sizeof(DataType) * (7 *
-                                                  6 +
-                                                  10); // Max 7 ( 3 results, 3 action probs, 1 new_probs) vectors per level, max depth of 6 and 1 for river
+    // Max depth less than 14 i think, and max 8 vecs allocated per level
+    int scratch_size = 1326 * sizeof(DataType) * 10 * 14;
     cudaMalloc(&device_scratch, scratch_size);
     cudaMemset(device_scratch, 0, scratch_size);
-
+    // Result will always be put in scratch[0..1326]
     evaluate_post_turn_kernel<<<1, 128>>>(device_opponent_range, state, evaluator, updating_player == 0 ? Small : Big,
-                                      device_scratch,
-                                      device_result);
+                                          device_scratch);
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -543,10 +576,16 @@ void evaluate_post_turn_cuda(DataType *opponent_range,
         fflush(stdout);
     }
     fflush(stdout);
-    cudaMemcpy(result, device_result, 1326 * sizeof(DataType), cudaMemcpyDeviceToHost);
+    cudaMemcpy(result, device_scratch, 1326 * sizeof(DataType), cudaMemcpyDeviceToHost);
 
     cudaFree(device_opponent_range);
     cudaFree(device_scratch);
-    cudaFree(device_result);
 }
 }
+//
+//int main() {
+//    DataType* range = malloc(sizeof (DataType) * 1326);
+//    memset(range, 0, sizeof (DataType) * 1326);
+//    State* state = build_post_turn_cuda(15l, 1.0);
+//
+//}
