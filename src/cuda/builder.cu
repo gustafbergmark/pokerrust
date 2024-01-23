@@ -138,17 +138,11 @@ build_post_turn_kernel(long cards, DataType bet, State *root, State *device_root
 extern "C" {
 void init() {
     size_t *size = (size_t *) malloc(sizeof(size_t));
-    cudaDeviceGetLimit(size, cudaLimitMallocHeapSize);
-    printf("old heap size: %zu\n", *size);
     cudaDeviceGetLimit(size, cudaLimitStackSize);
     printf("old stack size: %zu\n", *size);
     // Allocate 8 GiBi heap
     size_t heap_size = 8l * 1024l * 1024l * 1024l;
-    cudaDeviceSetLimit(cudaLimitMallocHeapSize, heap_size);
-    // Too small stack will result in: unspecified launch failure
     cudaDeviceSetLimit(cudaLimitStackSize, 2 * 4096);
-    cudaDeviceGetLimit(size, cudaLimitMallocHeapSize);
-    printf("new heap size: %zu\n", *size);
     cudaDeviceGetLimit(size, cudaLimitStackSize);
     printf("new stack size: %zu\n", *size);
     fflush(stdout);
