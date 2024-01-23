@@ -36,7 +36,7 @@ impl Strategy {
         let sum = regret_match[0] + regret_match[1] + regret_match[2];
         for k in 0..actions {
             for i in 0..1326 {
-                if sum[i] <= 1e-6 {
+                if sum[i] <= 1e-4 {
                     regret_match[k][i] = 1.0 / (actions as Float);
                 } else {
                     regret_match[k][i] /= sum[i];

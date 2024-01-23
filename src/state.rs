@@ -290,30 +290,6 @@ impl State {
         //(util of sb, util of bb, exploitability of updating player)
         match self.terminal {
             NonTerminal => {
-                if self.action == DealTurn {
-                    let start = Instant::now();
-                    let gpu = evaluate_post_turn_gpu(
-                        self.gpu_pointer.expect("GPU state pointer missing"),
-                        gpu_eval_ptr.expect("GPU eval pointer missing"),
-                        opponent_range,
-                        updating_player,
-                    );
-                    // for i in 0..1326 {
-                    //     //println!("{} {}", average_strategy[i], gpu[i]);
-                    //     //assert_approx_eq!(res[i], gpu[i], 1e-4);
-                    //     if (average_strategy[i] - gpu[i]).abs() > 1e-4 {
-                    //         dbg!(self.cards);
-                    //         dbg!(evaluator.u64_to_cards(self.cards));
-                    //         for j in 0..1326 {
-                    //             println!("{} {}", average_strategy[i], gpu[i]);
-                    //         }
-                    //         assert_approx_eq!(average_strategy[i], gpu[i], 1e-4);
-                    //     }
-                    // }
-                    //panic!("Once");
-                    println!("COMPLETE {} micros", start.elapsed().as_micros());
-                    return gpu;
-                }
                 // Observe: This vector is also used when calculating the exploitability
                 let mut average_strategy = if updating_player == self.next_to_act && calc_exploit {
                     Vector::from(&[Float::NEG_INFINITY; 1326])
@@ -362,7 +338,29 @@ impl State {
                         average_strategy += utility;
                     }
                 }
-
+                if self.action == DealTurn {
+                    let start = Instant::now();
+                    let gpu = evaluate_post_turn_gpu(
+                        self.gpu_pointer.expect("GPU state pointer missing"),
+                        gpu_eval_ptr.expect("GPU eval pointer missing"),
+                        opponent_range,
+                        updating_player,
+                    );
+                    for i in 0..1326 {
+                        //println!("{} {}", average_strategy[i], gpu[i]);
+                        assert_approx_eq!(average_strategy[i], gpu[i], 1e-1);
+                        // if (average_strategy[i] - gpu[i]).abs() > 1e-4 {
+                        //     dbg!(self.cards);
+                        //     dbg!(evaluator.u64_to_cards(self.cards));
+                        //     for j in 0..1326 {
+                        //         println!("{} {}", average_strategy[i], gpu[i]);
+                        //     }
+                        //     assert_approx_eq!(average_strategy[i], gpu[i], 1e-2);
+                        // }
+                    }
+                    //panic!("Once");
+                    println!("COMPLETE {} micros", start.elapsed().as_micros());
+                }
                 // update strategy
                 if self.next_to_act == updating_player && !calc_exploit {
                     let mut update = [Vector::default(); 3];
