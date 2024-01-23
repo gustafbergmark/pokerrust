@@ -1,10 +1,11 @@
 #include <stdio.h>
+#include <bit>
 #include <cuda_runtime.h>
 #include "structs.h"
 #include "evaluator.cuh"
 
 
-__device__ int possible_actions(State *state, short raises, Action *result) {
+int possible_actions(State *state, short raises, Action *result) {
     switch (state->action) {
         case Fold :
             return 0;
@@ -13,7 +14,7 @@ __device__ int possible_actions(State *state, short raises, Action *result) {
             result[1] = Raise;
             return 2;
         case Call :
-            if (__popcll(state->cards) == 4) {
+            if (__builtin_popcountll(state->cards) == 4) {
                 result[0] = DealRiver;
                 return 1;
             } else {
@@ -40,7 +41,7 @@ __device__ int possible_actions(State *state, short raises, Action *result) {
 }
 
 
-__device__ int get_action(State *state, Action action, State *new_states) {
+int get_action(State *state, Action action, State *new_states) {
     Player opponent = state->next_to_act == Small ? Big : Small;
     TerminalState fold_winner = state->next_to_act == Small ? BBWins : SBWins;
     DataType other_bet = state->next_to_act == Small ? state->bbbet : state->sbbet;
@@ -59,7 +60,7 @@ __device__ int get_action(State *state, Action action, State *new_states) {
             new_states->terminal = NonTerminal;
             break;
         case Call:
-            new_states->terminal = __popcll(state->cards) == 4 ? River : Showdown;
+            new_states->terminal = __builtin_popcountll(state->cards) == 4 ? River : Showdown;
             new_states->sbbet = other_bet;
             new_states->bbbet = other_bet;
             break;
@@ -85,17 +86,20 @@ __device__ int get_action(State *state, Action action, State *new_states) {
     return 1;
 }
 
-__device__ void add_transition(State *parent, State *child, DataType *vectors, int *vector_index) {
+void
+add_transition(State *parent, State *child, DataType *vectors, int *vector_index, State *root, State *device_root) {
     if (parent->terminal == NonTerminal) {
         parent->card_strategies[parent->transitions] = vectors + (*vector_index * 1326);
         *vector_index += 1;
     }
-    parent->next_states[parent->transitions] = child;
+    // Update pointers to work on gpu;
+    parent->next_states[parent->transitions] = device_root + (child - root);
     parent->transitions += 1;
 }
 
 
-__device__ int build(State *state, short raises, State *root, DataType *vectors, int *state_index, int *vector_index) {
+int build(State *state, short raises, State *root, State *device_root, DataType *vectors, int *state_index,
+          int *vector_index) {
     Action actions[3] = {};
     int count = 1;
     int num_actions = possible_actions(state, raises, actions);
@@ -105,17 +109,18 @@ __device__ int build(State *state, short raises, State *root, DataType *vectors,
         State *new_states = root + *state_index;
         int num_states = get_action(state, action, new_states);
         *state_index += num_states;
-        for(int j = 0; j < num_states; j++) {
-            State* new_state = new_states + j;
-            count += build(new_state, new_raises, root, vectors, state_index, vector_index);
-            add_transition(state, new_state, vectors, vector_index);
+        for (int j = 0; j < num_states; j++) {
+            State *new_state = new_states + j;
+            count += build(new_state, new_raises, root, device_root, vectors, state_index, vector_index);
+            add_transition(state, new_state, vectors, vector_index, root, device_root);
         }
     }
     return count;
 }
 
-__global__ void
-build_post_turn_kernel(long cards, DataType bet, State *root, DataType *vectors, int *state_index, int *vector_index) {
+void
+build_post_turn_kernel(long cards, DataType bet, State *root, State *device_root, DataType *vectors, int *state_index,
+                       int *vector_index) {
     *root = {.terminal = NonTerminal,
             .action = DealTurn,
             .cards = cards,
@@ -126,7 +131,7 @@ build_post_turn_kernel(long cards, DataType bet, State *root, DataType *vectors,
             .card_strategies = {},
             .next_states =  {}};
     *state_index += 1;
-    build(root, 0, root, vectors, state_index, vector_index);
+    build(root, 0, root, device_root, vectors, state_index, vector_index);
 }
 
 
@@ -152,42 +157,25 @@ State *build_post_turn_cuda(long cards, DataType bet) {
     cudaError_t err;
     int vector_index = 0;
     int state_index = 0;
-    int *device_state_index;
-    cudaMalloc(&device_state_index, sizeof(int));
-    cudaMemcpy(device_state_index, &state_index, sizeof(int), cudaMemcpyHostToDevice);
+    int state_size = sizeof(State) * (27 * 48 * 9 + 27);
+    State *root = (State *) malloc(state_size);
 
-    int *device_vector_index;
-    cudaMalloc(&device_vector_index, sizeof(int));
-    cudaMemcpy(device_vector_index, &vector_index, sizeof(int), cudaMemcpyHostToDevice);
-
-    State *root;
-    cudaMalloc(&root, sizeof(State) * (27 * 48 * 9 + 27) );
+    State *device_root;
+    cudaMalloc(&device_root, state_size);
 
     DataType *vectors;
     int vectors_size = sizeof(DataType) * 1326 * (26 * 48 * 9 + 26);
     cudaMalloc(&vectors, vectors_size);
     cudaMemset(vectors, 0, vectors_size);
-    err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("pre Error: %s\n", cudaGetErrorString(err));
-        fflush(stdout);
-    }
 
-    build_post_turn_kernel<<<1, 1>>>(cards, bet, root, vectors, device_state_index, device_vector_index);
+    build_post_turn_kernel(cards, bet, root, device_root, vectors, &state_index, &vector_index);
+    cudaMemcpy(device_root, root, state_size, cudaMemcpyHostToDevice);
     cudaDeviceSynchronize();
     err = cudaGetLastError();
     if (err != cudaSuccess) {
-        printf("Error: %s\n", cudaGetErrorString(err));
+        printf("Build error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
     }
-
-//    cudaMemcpy(&state_index, device_state_index, sizeof(int), cudaMemcpyDeviceToHost);
-//    cudaMemcpy(&vector_index, device_vector_index, sizeof(int), cudaMemcpyDeviceToHost);
-//    printf("pointer: %p state_index: %d vector_index: %d\n", root, state_index, vector_index);
-//    fflush(stdout);
-
-    cudaFree(device_state_index);
-    cudaFree(device_vector_index);
-    return root;
+    return device_root;
 }
 }
