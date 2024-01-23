@@ -38,6 +38,7 @@ int possible_actions(State *state, short raises, Action *result) {
             result[1] = Raise;
             return 2;
     }
+    return 0;
 }
 
 
@@ -82,6 +83,9 @@ int get_action(State *state, Action action, State *new_states) {
                 new_states += 1;
             }
             return 48;
+        case DealTurn :
+            // will not happen
+            return 0;
     }
     return 1;
 }
@@ -140,8 +144,6 @@ void init() {
     size_t *size = (size_t *) malloc(sizeof(size_t));
     cudaDeviceGetLimit(size, cudaLimitStackSize);
     printf("old stack size: %zu\n", *size);
-    // Allocate 8 GiBi heap
-    size_t heap_size = 8l * 1024l * 1024l * 1024l;
     cudaDeviceSetLimit(cudaLimitStackSize, 2 * 4096);
     cudaDeviceGetLimit(size, cudaLimitStackSize);
     printf("new stack size: %zu\n", *size);
