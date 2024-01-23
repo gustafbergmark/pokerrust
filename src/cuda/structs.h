@@ -42,4 +42,10 @@ struct State {
     State *next_states[48];
 };
 
+struct Context {
+    State* state;
+    DataType* opponent_range;
+    int transition;
+};
+
 #endif //POKERRUST_STRUCTS_H

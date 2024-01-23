@@ -14,7 +14,7 @@ mod vector;
 
 fn main() {
     // Set heap size of gpu
-    init_gpu();
+    //init_gpu();
     let mut game = builder::fixed_flop_poker();
     let start = Instant::now();
     for i in 1..=3 {
