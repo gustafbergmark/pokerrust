@@ -8,27 +8,30 @@
 
 
 
-__device__ int choose(int n, int k) {
-    int res = 1;
-    for (int i = n - k + 1; i <= n; i++) {
-        res *= i;
+__device__ int choose2(int n) {
+    if (n>1) {
+        return (n*(n-1)) / 2;
+    } else {
+        return 0;
     }
-    int div = 1;
-    for (int i = 1; i <= k; i++) {
-        div *= i;
-    }
-    res /= div;
-    return res;
 }
 
 __device__ int get_index(long set) {
     int res = 0;
     int i = __ffsll(set)-1;
-    res += choose(i, 1);
+    res += i;
     set ^= 1l << i;
     i = __ffsll(set)-1;
-    res += choose(i, 2);
+    res += choose2(i);
     return res;
+}
+
+__device__ long from_index(int index) {
+    int limit = (int)(sqrtf((float)(2*index))) + 1;
+    //if (limit*(limit-1)/2 > index) limit--;
+    limit -= (limit*(limit-1)) > (2*index);
+    index -= limit * (limit-1) / 2;
+    return (1l<<(limit)) | ( 1l << index);
 }
 
 
@@ -56,3 +59,25 @@ void free_eval_cuda(Evaluator *device_eval) {
 }
 
 }
+//#include <fcntl.h>
+//#include <sys/mman.h>
+//#include <unistd.h>
+//Evaluator* src = (Evaluator*) malloc(sizeof (Evaluator));
+//cudaMemcpy(src, device_eval, sizeof (Evaluator), cudaMemcpyDeviceToHost);
+//cudaDeviceSynchronize();
+///* DESTINATION */
+//int dfd = open("evaluator_test", O_RDWR | O_CREAT, 0666);
+//size_t filesize = sizeof(Evaluator);
+//
+//ftruncate(dfd, sizeof (Evaluator));
+//
+//void* dest = mmap(NULL, sizeof(Evaluator), PROT_READ | PROT_WRITE, MAP_SHARED, dfd, 0);
+//
+///* COPY */
+//
+//memcpy(dest, src, filesize);
+//
+//munmap(dest, filesize);
+//close(dfd);
+//
+//exit(2);

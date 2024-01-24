@@ -15,4 +15,6 @@ struct Evaluator {
 
 __device__ int get_index(long set);
 
+__device__ long from_index(int index);
+
 #endif //POKERRUST_EVALUATOR_CUH
