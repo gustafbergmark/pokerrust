@@ -30,6 +30,10 @@ enum Player {
     Big,
 };
 
+struct __align__(512) Vector {
+DataType values[1326];
+};
+
 struct State {
     TerminalState terminal;
     Action action;
@@ -38,14 +42,15 @@ struct State {
     DataType bbbet;
     Player next_to_act;
     short transitions;
-    DataType *card_strategies[48];
+    Vector *card_strategies[48];
     State *next_states[48];
 };
 
 struct Context {
-    State* state;
-    DataType* opponent_range;
+    State *state;
+    Vector *opponent_range;
     int transition;
 };
+
 
 #endif //POKERRUST_STRUCTS_H

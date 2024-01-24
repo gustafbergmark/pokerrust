@@ -50,11 +50,29 @@ impl<T: Sized + Clone, const N: usize, const K: usize> CombinationMap<T, N, K> {
         assert_eq!(ret.count_ones(), x.count_ones());
         ret
     }
+
+    pub fn from_index(mut index: usize) -> u64 {
+        let mut set = 0;
+        for c in 0..K {
+            for i in 1.. {
+                if choose(i, K - c) > index {
+                    set |= 1 << (i - 1);
+                    index -= choose(i - 1, K - c);
+                    break;
+                }
+            }
+        }
+        set
+    }
 }
 
 #[inline]
 pub fn choose(n: usize, k: usize) -> usize {
-    (n - k + 1..=n).product::<usize>() / (1..=k).product::<usize>()
+    if n >= k {
+        (n - k + 1..=n).product::<usize>() / (1..=k).product::<usize>()
+    } else {
+        0
+    }
 }
 
 impl<T: Sized + Clone, const N: usize, const K: usize> Index<u64> for CombinationMap<T, N, K> {

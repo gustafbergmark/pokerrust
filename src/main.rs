@@ -1,4 +1,3 @@
-use crate::cuda_interface::init_gpu;
 use std::time::Instant;
 
 mod builder;

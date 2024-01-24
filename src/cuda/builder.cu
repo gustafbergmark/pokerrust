@@ -91,9 +91,9 @@ int get_action(State *state, Action action, State *new_states) {
 }
 
 void
-add_transition(State *parent, State *child, DataType *vectors, int *vector_index, State *root, State *device_root) {
+add_transition(State *parent, State *child, Vector *vectors, int *vector_index, State *root, State *device_root) {
     if (parent->terminal == NonTerminal) {
-        parent->card_strategies[parent->transitions] = vectors + (*vector_index * 1326);
+        parent->card_strategies[parent->transitions] = vectors + *vector_index;
         *vector_index += 1;
     }
     // Update pointers to work on gpu;
@@ -102,7 +102,7 @@ add_transition(State *parent, State *child, DataType *vectors, int *vector_index
 }
 
 
-int build(State *state, short raises, State *root, State *device_root, DataType *vectors, int *state_index,
+int build(State *state, short raises, State *root, State *device_root, Vector *vectors, int *state_index,
           int *vector_index) {
     Action actions[3] = {};
     int count = 1;
@@ -123,7 +123,7 @@ int build(State *state, short raises, State *root, State *device_root, DataType 
 }
 
 void
-build_post_turn_kernel(long cards, DataType bet, State *root, State *device_root, DataType *vectors, int *state_index,
+build_post_turn_kernel(long cards, DataType bet, State *root, State *device_root, Vector *vectors, int *state_index,
                        int *vector_index) {
     *root = {.terminal = NonTerminal,
             .action = DealTurn,
@@ -159,8 +159,8 @@ State *build_post_turn_cuda(long cards, DataType bet) {
     State *device_root;
     cudaMalloc(&device_root, state_size);
 
-    DataType *vectors;
-    int vectors_size = sizeof(DataType) * 1326 * (26 * 48 * 9 + 26);
+    Vector *vectors;
+    int vectors_size = sizeof(Vector) * (26 * 48 * 9 + 26);
     cudaMalloc(&vectors, vectors_size);
     cudaMemset(vectors, 0, vectors_size);
 
