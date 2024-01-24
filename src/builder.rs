@@ -14,14 +14,9 @@ use std::time::{Duration, Instant};
 // A variant where the flop is fixed, and no raising the first two rounds of betting.
 // Should be about 1 GB in size
 pub(crate) fn fixed_flop_poker() -> Game<'static> {
-    let mut card_order: Vec<[Card; 2]> = Card::generate_deck()
-        .combinations(2)
-        .map(|e| e.try_into().unwrap())
-        .collect();
-    card_order.sort();
     let mut root = State::new(NonTerminal, DealHole, 0.5, 1.0, Small);
     let start = Instant::now();
-    let evaluator = Evaluator::new(card_order);
+    let evaluator = Evaluator::new();
     println!(
         "Evaluator created in {} seconds",
         start.elapsed().as_secs_f32()

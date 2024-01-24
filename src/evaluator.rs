@@ -19,13 +19,26 @@ pub struct Evaluator<'a> {
 }
 #[allow(unused)]
 impl Evaluator<'_> {
-    pub fn new(card_order: Vec<[Card; 2]>) -> Self {
+    pub fn new() -> Self {
         let mut card_nums = HashMap::new();
         let mut num_cards = HashMap::new();
         for (i, card) in Card::generate_deck().enumerate() {
             card_nums.insert(card, 1 << i);
             num_cards.insert(1 << i, card);
         }
+        let mut card_order: Vec<[Card; 2]> = Card::generate_deck()
+            .combinations(2)
+            .map(|e| e.try_into().unwrap())
+            .collect();
+
+        // create card_order as u64
+        let card_order: Vec<u64> = card_order
+            .clone()
+            .iter()
+            .map(|cards| card_nums.get(&cards[0]).unwrap() | card_nums.get(&cards[1]).unwrap())
+            .sorted()
+            .collect();
+
         let (vectorized_eval, collisions) = match std::fs::read("./files/eval_small.bin") {
             Ok(eval) => bincode::deserialize(&eval).expect("Failed to deserialize"),
             Err(_) => {
@@ -38,15 +51,6 @@ impl Evaluator<'_> {
                 let fixed_flop = &deck[..3];
                 let deck = deck[3..].to_vec().into_iter();
 
-                // create card_order as u64
-                let card_order_num: Vec<u64> = card_order
-                    .clone()
-                    .iter()
-                    .map(|cards| {
-                        card_nums.get(&cards[0]).unwrap() | card_nums.get(&cards[1]).unwrap()
-                    })
-                    .collect();
-
                 let result = deck
                     //.combinations(5) // Full game
                     .combinations(2) // Fixed Flop
@@ -58,12 +62,12 @@ impl Evaluator<'_> {
                         let mut result: Vec<u16> = vec![0; 1326 + 128 * 2];
                         let mut coll_vec = vec![0; 52 * 51];
                         let mut evals = vec![];
-                        for (i, cards) in card_order.iter().enumerate() {
-                            let num_cards = Self::cards_to_u64_inner(cards, &card_nums);
-                            if num_hand & num_cards > 0 {
+                        for (i, &cards) in card_order.iter().enumerate() {
+                            if num_hand & cards > 0 {
                                 evals.push((poker::Eval::WORST, i));
                             } else {
-                                let combined = box_cards!(cards, hand);
+                                let combined =
+                                    box_cards!(Self::u64_to_cards_inner(cards, &num_cards), hand);
                                 evals.push((
                                     evaluator.evaluate(combined).expect("Failed to evaluate"),
                                     i,
@@ -106,7 +110,7 @@ impl Evaluator<'_> {
                                 current_group += 1;
                             }
                             let sorted_index = sorted_index & 2047;
-                            let hand = card_order_num[sorted_index as usize];
+                            let hand = card_order[sorted_index as usize];
                             let cards = Self::separate_cards(hand);
                             for c in cards {
                                 let mut val = i as u16;
@@ -142,11 +146,6 @@ impl Evaluator<'_> {
                 result
             }
         };
-
-        let card_order: Vec<_> = card_order
-            .iter()
-            .map(|hand| Evaluator::cards_to_u64_inner(hand, &card_nums))
-            .collect();
 
         let mut card_indexes_builder = vec![vec![]; 52];
         for (i, cards) in card_order.iter().enumerate() {
@@ -197,14 +196,17 @@ impl Evaluator<'_> {
         Self::cards_to_u64_inner(cards, &self.card_nums)
     }
 
-    pub fn u64_to_cards(&self, cards: u64) -> Vec<Card> {
+    fn u64_to_cards_inner(cards: u64, num_cards: &HashMap<u64, Card>) -> Vec<Card> {
         let mut res = Vec::new();
         for i in 0..52 {
             if (1 << i) & cards > 0 {
-                res.push(self.num_cards.get(&(1 << i)).unwrap().clone())
+                res.push(num_cards.get(&(1 << i)).unwrap().clone())
             }
         }
         res
+    }
+    pub fn u64_to_cards(&self, cards: u64) -> Vec<Card> {
+        Self::u64_to_cards_inner(cards, &self.num_cards)
     }
 
     fn cards_to_u64_inner(cards: &[Card], card_nums: &HashMap<Card, u64>) -> u64 {

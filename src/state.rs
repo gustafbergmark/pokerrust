@@ -14,6 +14,7 @@ use assert_approx_eq::assert_approx_eq;
 use itertools::Itertools;
 use poker::Suit::*;
 use poker::{Card, Suit};
+use rayon::iter::IntoParallelRefMutIterator;
 use rayon::iter::ParallelIterator;
 use std::collections::HashSet;
 use std::iter::zip;
@@ -338,7 +339,7 @@ impl State {
                         average_strategy += utility;
                     }
                 }
-                if self.action == DealTurn && false {
+                if self.action == DealTurn {
                     let start = Instant::now();
                     let gpu = evaluate_post_turn_gpu(
                         self.gpu_pointer.expect("GPU state pointer missing"),
@@ -348,7 +349,7 @@ impl State {
                     );
                     for i in 0..1326 {
                         //println!("{} {}", average_strategy[i], gpu[i]);
-                        assert_approx_eq!(average_strategy[i], gpu[i], 1e-1);
+                        assert_approx_eq!(average_strategy[i], gpu[i], 1e-4);
                         // if (average_strategy[i] - gpu[i]).abs() > 1e-4 {
                         //     dbg!(self.cards);
                         //     dbg!(evaluator.u64_to_cards(self.cards));
@@ -380,6 +381,7 @@ impl State {
             BBWins => self.evaluate_fold(opponent_range, evaluator, updating_player, Small),
             Flop => {
                 let mut total = Vector::default();
+                let mut count = 0.0;
                 for next_state in self.next_states.iter_mut() {
                     let eval_ptr = transfer_flop_eval(evaluator, next_state.cards);
                     let res = next_state.evaluate_state(
@@ -390,11 +392,12 @@ impl State {
                         Some(eval_ptr),
                     );
                     for &permutation in &next_state.permutations {
-                        total += permute(permutation, res)
+                        count += 1.0;
+                        total += permute(permutation, res, evaluator)
                     }
                     free_eval(eval_ptr);
                 }
-                total * (1.0 / (self.next_states.len() as Float))
+                total * (1.0 / count)
             }
             Turn => {
                 let mut total = Vector::default();
