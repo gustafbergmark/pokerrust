@@ -29,7 +29,6 @@ impl<'a> Game<'a> {
 
     pub fn perform_iter(&mut self, iter: usize) {
         let start = Instant::now();
-
         let _ = self
             .root
             .evaluate_state(&Vector::ones(), &self.evaluator, Small, false, None);
@@ -38,7 +37,7 @@ impl<'a> Game<'a> {
             .root
             .evaluate_state(&Vector::ones(), &self.evaluator, Big, false, None);
         let iter_time = start.elapsed().as_secs_f32();
-        if iter % 1 == 0 {
+        if iter % 10 == 0 {
             let exp_sb =
                 self.root
                     .evaluate_state(&Vector::ones(), &self.evaluator, Small, true, None);

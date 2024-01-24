@@ -394,7 +394,7 @@ impl State {
                     }
                     free_eval(eval_ptr);
                 }
-                total * (1.0 / 22100.0)
+                total * (1.0 / (self.next_states.len() as Float))
             }
             Turn => {
                 let mut total = Vector::default();
