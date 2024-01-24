@@ -338,7 +338,7 @@ impl State {
                         average_strategy += utility;
                     }
                 }
-                if self.action == DealTurn {
+                if self.action == DealTurn && false {
                     let start = Instant::now();
                     let gpu = evaluate_post_turn_gpu(
                         self.gpu_pointer.expect("GPU state pointer missing"),
@@ -382,8 +382,6 @@ impl State {
                 let mut total = Vector::default();
                 for next_state in self.next_states.iter_mut() {
                     let eval_ptr = transfer_flop_eval(evaluator, next_state.cards);
-                    println!("Transfer complete: {:?}", eval_ptr);
-
                     let res = next_state.evaluate_state(
                         opponent_range,
                         evaluator,

@@ -16,9 +16,8 @@ fn main() {
     //init_gpu();
     let mut game = builder::fixed_flop_poker();
     let start = Instant::now();
-    for i in 1..=3 {
+    for i in 1..=1000 {
         game.perform_iter(i);
-        println!("iter done");
     }
     //dbg!(&game);
     dbg!(start.elapsed().as_millis());
