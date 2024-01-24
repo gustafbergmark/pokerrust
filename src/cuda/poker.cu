@@ -3,6 +3,7 @@
 #include "math.h"
 #include "structs.h"
 #include "evaluator.cuh"
+#include <sys/time.h>
 // Everything expect a  dimension of 1x128, and vectors of size 1326 (most of the time)
 
 __device__ void multiply(DataType *v1, DataType *v2, DataType *res) {
@@ -360,15 +361,15 @@ __device__ void evaluate_post_turn_kernel_inner(DataType *opponent_range_root,
                                                 DataType *temp) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     Context contexts[14];
-    contexts[0] = {root_state, opponent_range_root,0};
+    contexts[0] = {root_state, opponent_range_root, 0};
     int depth = 0;
 
     while (depth >= 0) {
         //if(tid==0) printf("depth %d\n", depth);
         DataType *scratch = scratch_root + 1326 * depth * 10;
-        Context* context = &contexts[depth];
-        State* state = context->state;
-        DataType* opponent_range = context->opponent_range;
+        Context *context = &contexts[depth];
+        State *state = context->state;
+        DataType *opponent_range = context->opponent_range;
         switch (state->terminal) {
             case Showdown : {
                 long set = state->cards ^ evaluator->flop;
@@ -431,7 +432,7 @@ __device__ void evaluate_post_turn_kernel_inner(DataType *opponent_range_root,
                         scratch += 1326; // + 1
                         multiply(opponent_range, action_probs + 1326*i, new_range);
                     }
-                    contexts[depth+1] = {next, new_range, 0};
+                    contexts[depth + 1] = {next, new_range, 0};
                     context->transition++;
                     depth++;
                 }
@@ -444,7 +445,7 @@ __device__ void evaluate_post_turn_kernel_inner(DataType *opponent_range_root,
                     zero(result);
                 } else {
                     // offset to next depths result
-                    add_assign(result, result + 1326*10);
+                    add_assign(result, result + 1326 * 10);
                 }
                 if (context->transition == context->state->transitions) {
                     for (int b = 0; b < 11; b++) {
@@ -457,8 +458,8 @@ __device__ void evaluate_post_turn_kernel_inner(DataType *opponent_range_root,
                 } else {
                     int i = context->transition;
                     State *next = state->next_states[i];
-                    contexts[depth+1] = {next, opponent_range, 0};
-                    context->transition+=1;
+                    contexts[depth + 1] = {next, opponent_range, 0};
+                    context->transition += 1;
                     depth++;
                 }
                 break;
@@ -478,6 +479,11 @@ __global__ void evaluate_post_turn_kernel(DataType *opponent_range,
                                     sorted_eval, temp);
 }
 
+double cpuSecond() {
+    struct timeval tp;
+    gettimeofday(&tp, NULL);
+    return ((double) tp.tv_sec + (double) tp.tv_usec * 1.e-6);
+}
 
 extern "C" {
 void evaluate_showdown_cuda(DataType *opponent_range, long communal_cards, long *card_order, short *eval,
@@ -567,25 +573,77 @@ void evaluate_post_turn_cuda(DataType *opponent_range,
     cudaMalloc(&device_scratch, scratch_size);
     cudaMemset(device_scratch, 0, scratch_size);
     // Result will always be put in scratch[0..1326]
-    evaluate_post_turn_kernel<<<1, 128>>>(device_opponent_range, state, evaluator, updating_player == 0 ? Small : Big,
-                                          device_scratch);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("Error: %s\n", cudaGetErrorString(err));
+    for(int i = 0; i < 1; i++ ) {
+        double start = cpuSecond();
+        evaluate_post_turn_kernel<<<1, 128>>>(device_opponent_range, state, evaluator, updating_player == 0 ? Small : Big,
+                                              device_scratch);
+
+        cudaMemcpy(result, device_scratch, 1326 * sizeof(DataType), cudaMemcpyDeviceToHost);
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            printf("Error: %s\n", cudaGetErrorString(err));
+        }
+        double elapsed = cpuSecond() - start;
+        printf("Kernel time: %fs i: %d\n", elapsed,i);
         fflush(stdout);
     }
-    fflush(stdout);
-    cudaMemcpy(result, device_scratch, 1326 * sizeof(DataType), cudaMemcpyDeviceToHost);
 
     cudaFree(device_opponent_range);
     cudaFree(device_scratch);
 }
 }
 //
-//int main() {
-//    DataType* range = malloc(sizeof (DataType) * 1326);
-//    memset(range, 0, sizeof (DataType) * 1326);
-//    State* state = build_post_turn_cuda(15l, 1.0);
+//#include "builder.cu"
+//#include <fcntl.h>
+//#include <sys/mman.h>
+//#include <unistd.h>
 //
+//int main() {
+//    DataType* range = (float*)calloc(1326, sizeof (DataType));
+//    for(int i = 0; i < 1326; i++) {
+//        range[i] = 1.0;
+//    }
+//    State* state = build_post_turn_cuda(15l, 1.0);
+//    DataType* result = (float*) calloc(1326, sizeof(DataType));
+//    Evaluator* device_evaluator;
+//    cudaMalloc(&device_evaluator, sizeof(Evaluator));
+//    Evaluator* evaluator = (Evaluator*) calloc(1, sizeof (Evaluator));
+//    int file_evaluator = open("evaluator_test", O_RDWR | O_CREAT, 0666);
+//    void *src = mmap(NULL, sizeof(Evaluator), PROT_READ | PROT_WRITE, MAP_SHARED, file_evaluator, 0);
+//
+//    memcpy(evaluator, src, sizeof (Evaluator));
+//    munmap(src, sizeof (Evaluator));
+//    close(file_evaluator);
+//
+//    cudaMemcpy(device_evaluator, evaluator, sizeof (Evaluator), cudaMemcpyHostToDevice);
+//    evaluate_post_turn_cuda(range, state, device_evaluator, 0, result);
+//    float sum = 0;
+//    for(int i =0 ;i < 1326; i++) {
+//        sum += result[i];
+//    }
+//    printf("sum: %f\n", sum);
+//    free(range);
+//    free(result);
+//    cudaFree(state);
+//    cudaFree(device_evaluator);
 //}
+
+//Evaluator* src = (Evaluator*) malloc(sizeof (Evaluator));
+//cudaMemcpy(src, device_eval, sizeof (Evaluator), cudaMemcpyDeviceToHost);
+//cudaDeviceSynchronize();
+///* DESTINATION */
+//int dfd = open("evaluator_test", O_RDWR | O_CREAT, 0666);
+//size_t filesize = sizeof(Evaluator);
+//
+//ftruncate(dfd, sizeof (Evaluator));
+//
+//void* dest = mmap(NULL, sizeof(Evaluator), PROT_READ | PROT_WRITE, MAP_SHARED, dfd, 0);
+//
+///* COPY */
+//
+//memcpy(dest, src, filesize);
+//
+//munmap(dest, filesize);
+//close(dfd);
+//
+//exit(2);

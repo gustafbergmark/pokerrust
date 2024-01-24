@@ -24,4 +24,4 @@ assert_approx_eq = "1.1.0"
 rayon = "1.8.0"
 
 [build-dependencies]
-cc = "1.0"
+cc = "1.0.83"
