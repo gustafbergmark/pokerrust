@@ -384,13 +384,26 @@ impl State {
                 let mut count = 0.0;
                 for next_state in self.next_states.iter_mut() {
                     let eval_ptr = transfer_flop_eval(evaluator, next_state.cards);
-                    let res = next_state.evaluate_state(
-                        opponent_range,
+                    let mut new_range = *opponent_range;
+                    // It is impossible to have hands which contains flop cards
+                    for i in 0..1326 {
+                        if (evaluator.card_order()[i] & next_state.cards) > 0 {
+                            new_range[i] = 0.0;
+                        }
+                    }
+                    let mut res = next_state.evaluate_state(
+                        &new_range,
                         evaluator,
                         updating_player,
                         calc_exploit,
                         Some(eval_ptr),
                     );
+                    // For safety for the future
+                    for i in 0..1326 {
+                        if (evaluator.card_order()[i] & next_state.cards) > 0 {
+                            res[i] = 0.0;
+                        }
+                    }
                     for &permutation in &next_state.permutations {
                         count += 1.0;
                         total += permute(permutation, res, evaluator)
@@ -402,13 +415,26 @@ impl State {
             Turn => {
                 let mut total = Vector::default();
                 for next_state in self.next_states.iter_mut() {
-                    let res = next_state.evaluate_state(
-                        opponent_range,
+                    let mut new_range = *opponent_range;
+                    // It is impossible to have hands which contains flop cards
+                    for i in 0..1326 {
+                        if (evaluator.card_order()[i] & next_state.cards) > 0 {
+                            new_range[i] = 0.0;
+                        }
+                    }
+                    let mut res = next_state.evaluate_state(
+                        &new_range,
                         evaluator,
                         updating_player,
                         calc_exploit,
                         gpu_eval_ptr,
                     );
+                    // For safety for the future
+                    for i in 0..1326 {
+                        if (evaluator.card_order()[i] & next_state.cards) > 0 {
+                            res[i] = 0.0;
+                        }
+                    }
                     total += res;
                 }
                 total * (1.0 / (self.next_states.len() as Float))

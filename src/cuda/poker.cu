@@ -353,6 +353,15 @@ evaluate_fold_kernel(DataType *opponent_range, long communal_cards, short *card_
                                folding_player, bet, result, range_sum, temp);
 }
 
+__device__ void remove_collisions(Vector *vector, int card, short card_indexes[2652]) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if(tid < 51) {
+        short index = card_indexes[card*51 + tid];
+        vector->values[index] = 0.0f;
+    }
+    __syncthreads();
+}
+
 __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                                                 State *root_state,
                                                 Evaluator *evaluator,
@@ -448,6 +457,8 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                     zero(result);
                 } else {
                     // offset to next depths result
+                    int dealt_card = __ffsll(state->next_states[context->transition -1]->cards ^ state->cards)-1;
+                    remove_collisions(result+10, dealt_card, evaluator->card_indexes);
                     add_assign(result, result + 10);
                 }
                 if (context->transition == context->state->transitions) {
@@ -461,7 +472,12 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                 } else {
                     int i = context->transition;
                     State *next = state->next_states[i];
-                    contexts[depth + 1] = {next, opponent_range, 0};
+                    int dealt_card = __ffsll(next->cards ^ state->cards)-1;
+                    Vector* new_range = scratch;
+                    scratch+=1;
+                    copy(opponent_range, new_range);
+                    remove_collisions(new_range, dealt_card, evaluator->card_indexes);
+                    contexts[depth + 1] = {next, new_range, 0};
                     context->transition += 1;
                     depth++;
                 }
