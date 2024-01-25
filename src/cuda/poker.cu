@@ -377,7 +377,7 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                                                 State *root_state,
                                                 Evaluator *evaluator,
                                                 Player updating_player,
-                                                Vector *scratch_root, DataType *sorted_range, DataType *sorted_eval,
+                                                Vector *scratch_root, DataType *sorted_eval,
                                                 DataType *temp) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     Context contexts[14];
@@ -398,7 +398,7 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                 short *eval = evaluator->eval + eval_index * (1326 + 128 * 2);
                 short *coll_vec = evaluator->coll_vec + eval_index * 52 * 51;
                 evaluate_showdown_kernel_inner(opponent_range->values, state->cards, eval,
-                                               coll_vec, state->sbbet, (DataType *) scratch, sorted_range, sorted_eval,
+                                               coll_vec, state->sbbet, (DataType *) scratch, (DataType*) (scratch+1), sorted_eval,
                                                temp);
                 depth--;
             }
@@ -509,10 +509,9 @@ __global__ void evaluate_post_turn_kernel(Vector *opponent_range,
                                           Player updating_player,
                                           Vector *scratch) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    __shared__ DataType sorted_range[1327];
     __shared__ DataType sorted_eval[1326];
     __shared__ DataType temp[128];
-    evaluate_post_turn_kernel_inner(opponent_range, state, evaluator, updating_player, scratch, sorted_range,
+    evaluate_post_turn_kernel_inner(opponent_range, state, evaluator, updating_player, scratch,
                                     sorted_eval, temp);
     // Remove utility of impossible hands
     for (int b = 0; b < 11; b++) {
