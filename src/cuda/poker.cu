@@ -6,7 +6,7 @@
 #include <sys/time.h>
 // Everything expect a  dimension of 1x128, and vectors of size 1326 (most of the time)
 
-__device__ void multiply(Vector* __restrict__ v1, Vector* __restrict__ v2, Vector* __restrict__ res) {
+__device__ void multiply(Vector *__restrict__ v1, Vector *__restrict__ v2, Vector *__restrict__ res) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     for (int b = 0; b < 11; b++) {
         int index = i + 128 * b;
@@ -16,7 +16,7 @@ __device__ void multiply(Vector* __restrict__ v1, Vector* __restrict__ v2, Vecto
     }
 }
 
-__device__ void fma(Vector* __restrict__ v1, Vector* __restrict__ v2, Vector* __restrict__ res) {
+__device__ void fma(Vector *__restrict__ v1, Vector *__restrict__ v2, Vector *__restrict__ res) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     for (int b = 0; b < 11; b++) {
         int index = i + 128 * b;
@@ -26,7 +26,7 @@ __device__ void fma(Vector* __restrict__ v1, Vector* __restrict__ v2, Vector* __
     }
 }
 
-__device__ void add_assign(Vector* __restrict__ v1, Vector* __restrict__ v2) {
+__device__ void add_assign(Vector *__restrict__ v1, Vector *__restrict__ v2) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     for (int b = 0; b < 11; b++) {
         int index = i + 128 * b;
@@ -36,7 +36,7 @@ __device__ void add_assign(Vector* __restrict__ v1, Vector* __restrict__ v2) {
     }
 }
 
-__device__ void sub_assign(Vector* __restrict__ v1, Vector* __restrict__ v2) {
+__device__ void sub_assign(Vector *__restrict__ v1, Vector *__restrict__ v2) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     for (int b = 0; b < 11; b++) {
         int index = i + 128 * b;
@@ -46,7 +46,7 @@ __device__ void sub_assign(Vector* __restrict__ v1, Vector* __restrict__ v2) {
     }
 }
 
-__device__ void copy(Vector* __restrict__ from, Vector* __restrict__ into) {
+__device__ void copy(Vector *__restrict__ from, Vector *__restrict__ into) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     for (int b = 0; b < 11; b++) {
         int index = i + 128 * b;
@@ -140,7 +140,7 @@ __device__ void get_strategy(State *state, Vector *scratch, Vector *result) {
     }
 }
 
-__device__ void update_strategy(State* __restrict__ state, Vector* __restrict__ update) {
+__device__ void update_strategy(State *__restrict__ state, Vector *__restrict__ update) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     for (int i = 0; i < state->transitions; i++) {
         add_assign(state->card_strategies[i], update + i);
@@ -154,7 +154,7 @@ __device__ void update_strategy(State* __restrict__ state, Vector* __restrict__ 
 }
 
 __device__ void
-handle_collisions(int i, long communal_cards, long *card_order, short *eval, short *coll_vec,
+handle_collisions(int i, long communal_cards, short *eval, short *coll_vec,
                   DataType *sorted_range, DataType *sorted_eval) {
     __syncthreads();
     // Handle collisions before prefix sum consumes sorted_range
@@ -166,7 +166,7 @@ handle_collisions(int i, long communal_cards, long *card_order, short *eval, sho
         for (int c = 0; c < 51; c++) {
             int index = coll_vec[offset + c];
             // Skip impossible hands, unnecessary here, but consistent
-            if ((communal_cards & card_order[eval[index & 2047] & 2047]) > 0) continue;
+            if ((communal_cards & from_index(eval[index & 2047] & 2047)) > 0) continue;
             // 2048 bit set => new group
             if (index & 2048) {
                 sum += group_sum;
@@ -187,7 +187,7 @@ handle_collisions(int i, long communal_cards, long *card_order, short *eval, sho
             // Go backwards
             int index = coll_vec[offset + 50 - c];
             // Skip impossible hands
-            if ((communal_cards & card_order[eval[index & 2047] & 2047]) > 0) continue;
+            if ((communal_cards & from_index(eval[index & 2047] & 2047)) > 0) continue;
             // Reverse ordering, because reverse iteration
             atomicAdd(&sorted_eval[index & 2047], sum);
             group_sum += sorted_range[index & 2047];
@@ -203,7 +203,7 @@ handle_collisions(int i, long communal_cards, long *card_order, short *eval, sho
 }
 
 __device__ void
-evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, long *card_order, short *eval,
+evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, short *eval,
                                short *coll_vec, DataType bet, DataType *result, DataType *sorted_range,
                                DataType *sorted_eval,
                                DataType *temp) {
@@ -220,7 +220,7 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, lo
             sorted_eval[index] = 0;
             result[index] = 0;
             // Impossible hand since overlap with communal cards
-            if ((communal_cards & card_order[eval[index] & 2047]) > 0) continue;
+            if ((communal_cards & from_index(eval[index] & 2047)) > 0) continue;
             sorted_range[index] = opponent_range[eval[index] & 2047];
         }
         if (index == 1326) {
@@ -229,7 +229,7 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, lo
     }
 
     // Handle card collisions
-    handle_collisions(i, communal_cards, card_order, eval, coll_vec, sorted_range, sorted_eval);
+    handle_collisions(i, communal_cards, eval, coll_vec, sorted_range, sorted_eval);
 
     // Calculate prefix sum
     cuda_prefix_sum(sorted_range, temp);
@@ -244,7 +244,7 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, lo
         int index = i * 11 + b;
         if (index < 1326) {
             // Impossible hand since overlap with communal cards
-            if ((communal_cards & card_order[eval[index] & 2047]) > 0) continue;
+            if ((communal_cards & from_index(eval[index] & 2047)) > 0) continue;
             if (eval[index] & 2048) { prev_group = index; }
             DataType worse = sorted_range[prev_group];
             sorted_eval[index] += worse;
@@ -256,7 +256,7 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, lo
         int index = i * 11 + b;
         if (index < 1326) {
             // Impossible hand since overlap with communal cards
-            if ((communal_cards & card_order[eval[index] & 2047]) > 0) continue;
+            if ((communal_cards & from_index(eval[index] & 2047)) > 0) continue;
             DataType better = sorted_range[1326] - sorted_range[next_group];
             sorted_eval[index] -= better;
             // Observe reverse order because of reverse iteration
@@ -276,17 +276,17 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, lo
 }
 
 __global__ void
-evaluate_showdown_kernel(DataType *opponent_range, long communal_cards, long *card_order, short *eval,
+evaluate_showdown_kernel(DataType *opponent_range, long communal_cards, short *eval,
                          short *coll_vec, DataType bet, DataType *result, Evaluator *evaluator) {
     __shared__ DataType sorted_range[1327];
     __shared__ DataType sorted_eval[1326];
     __shared__ DataType temp[128];
-    evaluate_showdown_kernel_inner(opponent_range, communal_cards, card_order, eval, coll_vec, bet, result,
+    evaluate_showdown_kernel_inner(opponent_range, communal_cards, eval, coll_vec, bet, result,
                                    sorted_range, sorted_eval, temp);
 }
 
 __device__ void
-evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, long *card_order, short *card_indexes,
+evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, short *card_indexes,
                            short updating_player, short folding_player, DataType bet, DataType *result,
                            DataType *range_sum,
                            DataType *temp) {
@@ -303,7 +303,7 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, long *
             // probability that the opponent got exactly the same hand
             result[index] = 0;
             // Impossible hand since overlap with communal cards
-            if (communal_cards & card_order[index]) continue;
+            if (communal_cards & from_index(index)) continue;
             range_sum[index] = opponent_range[index];
             result[index] = opponent_range[index];
         }
@@ -319,12 +319,12 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, long *
         DataType card_sum = 0.0;
         for (int c = 0; c < 51; c++) {
             short index = card_indexes[i * 51 + c];
-            if (communal_cards & card_order[index]) continue;
+            if (communal_cards & from_index(index)) continue;
             card_sum += opponent_range[index];
         }
         for (int c = 0; c < 51; c++) {
             short index = card_indexes[i * 51 + c];
-            if (communal_cards & card_order[index]) continue;
+            if (communal_cards & from_index(index)) continue;
             atomicAdd(&result[index], -card_sum);
         }
     }
@@ -333,7 +333,7 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, long *
     for (int b = 0; b < 11; b++) {
         int index = i + 128 * b;
         if (index < 1326) {
-            if (communal_cards & card_order[index]) continue;
+            if (communal_cards & from_index(index)) continue;
             result[index] += total;
             if (updating_player == folding_player) {
                 result[index] *= -bet;
@@ -345,11 +345,11 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, long *
 }
 
 __global__ void
-evaluate_fold_kernel(DataType *opponent_range, long communal_cards, long *card_order, short *card_indexes,
+evaluate_fold_kernel(DataType *opponent_range, long communal_cards, short *card_indexes,
                      short updating_player, short folding_player, DataType bet, DataType *result) {
     __shared__ DataType range_sum[1326];
     __shared__ DataType temp[128];
-    evaluate_fold_kernel_inner(opponent_range, communal_cards, card_order, card_indexes, updating_player,
+    evaluate_fold_kernel_inner(opponent_range, communal_cards, card_indexes, updating_player,
                                folding_player, bet, result, range_sum, temp);
 }
 
@@ -376,19 +376,22 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                 int eval_index = get_index(set);
                 short *eval = evaluator->eval + eval_index * (1326 + 128 * 2);
                 short *coll_vec = evaluator->coll_vec + eval_index * 52 * 51;
-                evaluate_showdown_kernel_inner(opponent_range->values, state->cards, evaluator->card_order, eval,
-                                               coll_vec, state->sbbet, (DataType*)scratch, sorted_range, sorted_eval, temp);
+                evaluate_showdown_kernel_inner(opponent_range->values, state->cards, eval,
+                                               coll_vec, state->sbbet, (DataType *) scratch, sorted_range, sorted_eval,
+                                               temp);
                 depth--;
             }
                 break;
             case SBWins :
-                evaluate_fold_kernel_inner(opponent_range->values, state->cards, evaluator->card_order, evaluator->card_indexes,
-                                           updating_player, 1, state->bbbet, (DataType*) scratch, sorted_eval, temp);
+                evaluate_fold_kernel_inner(opponent_range->values, state->cards,
+                                           evaluator->card_indexes,
+                                           updating_player, 1, state->bbbet, (DataType *) scratch, sorted_eval, temp);
                 depth--;
                 break;
             case BBWins :
-                evaluate_fold_kernel_inner(opponent_range->values, state->cards, evaluator->card_order, evaluator->card_indexes,
-                                           updating_player, 0, state->sbbet, (DataType*) scratch, sorted_eval, temp);
+                evaluate_fold_kernel_inner(opponent_range->values, state->cards,
+                                           evaluator->card_indexes,
+                                           updating_player, 0, state->sbbet, (DataType *) scratch, sorted_eval, temp);
                 depth--;
                 break;
             case NonTerminal : {
@@ -403,7 +406,7 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                     get_strategy(state, scratch, action_probs);
                 } else {
                     int i = context->transition - 1;
-                    Vector* new_result = average_strategy + 10;
+                    Vector *new_result = average_strategy + 10;
                     copy(new_result, results + i);
                     if (updating_player == state->next_to_act) {
                         fma(results + i, action_probs + i, average_strategy);
@@ -507,7 +510,7 @@ void evaluate_showdown_cuda(DataType *opponent_range, long communal_cards, long 
     cudaMalloc(&device_coll_vec, 52 * 51 * sizeof(short));
     cudaMemcpy(device_coll_vec, coll_vec, 52 * 51 * sizeof(short), cudaMemcpyHostToDevice);
 
-    evaluate_showdown_kernel<<<1, 128>>>(device_opponent_range, communal_cards, device_card_order, device_eval,
+    evaluate_showdown_kernel<<<1, 128>>>(device_opponent_range, communal_cards, device_eval,
                                          device_coll_vec, bet, device_result, evaluator);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess)
@@ -541,7 +544,7 @@ void evaluate_fold_cuda(DataType *opponent_range, long communal_cards, long *car
     cudaMalloc(&device_card_indexes, 52 * 51 * sizeof(short));
     cudaMemcpy(device_card_indexes, card_indexes, 52 * 51 * sizeof(short), cudaMemcpyHostToDevice);
 
-    evaluate_fold_kernel<<<1, 128>>>(device_opponent_range, communal_cards, device_card_order, device_card_indexes,
+    evaluate_fold_kernel<<<1, 128>>>(device_opponent_range, communal_cards, device_card_indexes,
                                      updating_player, folding_player, bet, device_result);
 
     cudaError_t err = cudaGetLastError();
@@ -569,81 +572,70 @@ void evaluate_post_turn_cuda(DataType *opponent_range,
 
     Vector *device_scratch;
     // Max depth less than 14 i think, and max 8 vecs allocated per level
-    int scratch_size =  sizeof(Vector) * 10 * 14;
+    int scratch_size = sizeof(Vector) * 10 * 14;
     cudaMalloc(&device_scratch, scratch_size);
     cudaMemset(device_scratch, 0, scratch_size);
     // Result will always be put in scratch[0..1326]
-    for(int i = 0; i < 1; i++ ) {
-        double start = cpuSecond();
-        evaluate_post_turn_kernel<<<1, 128>>>(device_opponent_range, state, evaluator, updating_player == 0 ? Small : Big,
-                                              device_scratch);
+    double start = cpuSecond();
+    evaluate_post_turn_kernel<<<1, 128>>>(device_opponent_range, state, evaluator, updating_player == 0 ? Small : Big,
+                                          device_scratch);
 
-        cudaMemcpy(result, device_scratch, 1326 * sizeof(DataType), cudaMemcpyDeviceToHost);
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            printf("Error: %s\n", cudaGetErrorString(err));
-        }
-        double elapsed = cpuSecond() - start;
-        printf("Kernel time: %fs i: %d\n", elapsed,i);
-        fflush(stdout);
+    cudaMemcpy(result, device_scratch, 1326 * sizeof(DataType), cudaMemcpyDeviceToHost);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("Error: %s\n", cudaGetErrorString(err));
     }
+    double elapsed = cpuSecond() - start;
+    printf("Kernel time: %fs\n", elapsed);
+    fflush(stdout);
+
 
     cudaFree(device_opponent_range);
     cudaFree(device_scratch);
 }
 }
-//
+
 //#include "builder.cu"
 //#include <fcntl.h>
 //#include <sys/mman.h>
 //#include <unistd.h>
 //
 //int main() {
-//    DataType* range = (float*)calloc(1326, sizeof (DataType));
-//    for(int i = 0; i < 1326; i++) {
+//    DataType *range = (float *) calloc(1326, sizeof(DataType));
+//    for (int i = 0; i < 1326; i++) {
 //        range[i] = 1.0;
 //    }
-//    State* state = build_post_turn_cuda(15l, 1.0);
-//    DataType* result = (float*) calloc(1326, sizeof(DataType));
-//    Evaluator* device_evaluator;
+//    int ns = 1;
+//    State *states[ns];
+//    for (int i = 0; i < ns; i++) {
+//        states[i] = build_post_turn_cuda(15l, 1.0);
+//    }
+//    DataType *result = (float *) calloc(1326, sizeof(DataType));
+//    Evaluator *device_evaluator;
 //    cudaMalloc(&device_evaluator, sizeof(Evaluator));
-//    Evaluator* evaluator = (Evaluator*) calloc(1, sizeof (Evaluator));
+//    Evaluator *evaluator = (Evaluator *) calloc(1, sizeof(Evaluator));
 //    int file_evaluator = open("evaluator_test", O_RDWR | O_CREAT, 0666);
 //    void *src = mmap(NULL, sizeof(Evaluator), PROT_READ | PROT_WRITE, MAP_SHARED, file_evaluator, 0);
 //
-//    memcpy(evaluator, src, sizeof (Evaluator));
-//    munmap(src, sizeof (Evaluator));
+//    memcpy(evaluator, src, sizeof(Evaluator));
+//    munmap(src, sizeof(Evaluator));
 //    close(file_evaluator);
 //
-//    cudaMemcpy(device_evaluator, evaluator, sizeof (Evaluator), cudaMemcpyHostToDevice);
-//    evaluate_post_turn_cuda(range, state, device_evaluator, 0, result);
+//    cudaMemcpy(device_evaluator, evaluator, sizeof(Evaluator), cudaMemcpyHostToDevice);
+//
+//    for (int i = 0; i < ns; i++) {
+//        evaluate_post_turn_cuda(range, states[i], device_evaluator, 0, result);
+//    }
+//
 //    float sum = 0;
-//    for(int i =0 ;i < 1326; i++) {
+//    for (int i = 0; i < 1326; i++) {
 //        sum += result[i];
 //    }
 //    printf("sum: %f\n", sum);
 //    free(range);
 //    free(result);
-//    cudaFree(state);
+//    for (int i = 0; i < ns; i++) {
+//        cudaFree(states[i]);
+//    }
 //    cudaFree(device_evaluator);
 //}
-
-//Evaluator* src = (Evaluator*) malloc(sizeof (Evaluator));
-//cudaMemcpy(src, device_eval, sizeof (Evaluator), cudaMemcpyDeviceToHost);
-//cudaDeviceSynchronize();
-///* DESTINATION */
-//int dfd = open("evaluator_test", O_RDWR | O_CREAT, 0666);
-//size_t filesize = sizeof(Evaluator);
-//
-//ftruncate(dfd, sizeof (Evaluator));
-//
-//void* dest = mmap(NULL, sizeof(Evaluator), PROT_READ | PROT_WRITE, MAP_SHARED, dfd, 0);
-//
-///* COPY */
-//
-//memcpy(dest, src, filesize);
-//
-//munmap(dest, filesize);
-//close(dfd);
-//
-//exit(2);
