@@ -119,6 +119,25 @@ __device__ void cuda_prefix_sum(DataType *input, DataType *temp) {
     __syncthreads();
 }
 
+__device__ DataType reduce_sum(DataType *vector, DataType *temp) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    temp[i] = 0;
+    for (int b = 0; b < 11; b++) {
+        int index = i + 128 * b;
+        if (index < 1326) {
+            temp[i] += vector[index];
+        }
+    }
+    __syncthreads();
+    for (int k = 64; k > 0; k /= 2) {
+        if (i < k) {
+            temp[i] += temp[i + k];
+        }
+        __syncthreads();
+    }
+    return temp[0];
+}
+
 __device__ void get_strategy(State *state, Vector *scratch, Vector *result) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     Vector *sum = scratch;
@@ -278,7 +297,7 @@ evaluate_showdown_kernel(DataType *opponent_range, long communal_cards, short *e
 __device__ void
 evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, short *card_indexes,
                            short updating_player, short folding_player, DataType bet, DataType *result,
-                           DataType *range_sum,
+                           DataType *local_range,
                            DataType *temp) {
     __syncthreads();
     // Setup
@@ -287,50 +306,49 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, short 
     for (int b = 0; b < 11; b++) {
         int index = i + 128 * b;
         if (index < 1326) {
-            range_sum[index] = opponent_range[index];
+            local_range[index] = opponent_range[index];
             result[index] = opponent_range[index];
         }
     }
 
-    // Calculate prefix sum
-    cuda_prefix_sum(range_sum, temp);
+    DataType total = reduce_sum(local_range, temp);
 
-    // using result[1325] is a bit hacky, but correct
-    DataType total = range_sum[1325] + result[1325];
-
-    if (i < 52) {
-        DataType card_sum = 0.0;
-        for (int c = 0; c < 51; c++) {
-            short index = card_indexes[i * 51 + c];
-            card_sum += opponent_range[index];
-        }
-        for (int c = 0; c < 51; c++) {
-            short index = card_indexes[i * 51 + c];
-            atomicAdd(&result[index], -card_sum);
-        }
-    }
-//    else if (i < 104) {
-//        DataType card_sum = 0.0;
-//        for (int c = 26; c < 51; c++) {
-//            short index = card_indexes[(i-52) * 51 + c];
-//            card_sum += opponent_range[index];
-//        }
-//        for (int c = 26; c < 51; c++) {
-//            short index = card_indexes[(i-52) * 51 + c];
-//            atomicAdd(&result[index], -card_sum);
-//        }
-//    }
     __syncthreads();
-
+    temp[i] = 0;
+    DataType card_sum = 0.0;
+    if (i < 52) {
+        for (int c = 0; c < 26; c++) {
+            short index = card_indexes[i * 51 + c];
+            card_sum += local_range[index];
+        }
+        atomicAdd(&temp[i], card_sum);
+    } else if ((i>=64) && (i < (64+52))){
+        for (int c = 26; c < 51; c++) {
+            short index = card_indexes[(i-64) * 51 + c];
+            card_sum += local_range[index];
+        }
+        atomicAdd(&temp[i-64], card_sum);
+    }
+    __syncthreads();
     for (int b = 0; b < 11; b++) {
         int index = i + 128 * b;
         if (index < 1326) {
-            result[index] += total;
-            if (updating_player == folding_player) {
-                result[index] *= -bet;
-            } else {
-                result[index] *= bet;
-            }
+            long cards = from_index(index);
+            int card1 = __ffsll(cards)-1;
+            cards -= 1l<<card1;
+            int card2 = __ffsll(cards)-1;
+            local_range[index] -= temp[card1] + temp[card2];
+        }
+    }
+    __syncthreads();
+    if (updating_player == folding_player) {
+        bet = -bet;
+    }
+    total *= bet;
+    for (int b = 0; b < 11; b++) {
+        int index = i + 128 * b;
+        if (index < 1326) {
+            result[index] = local_range[index] * bet + total;
         }
     }
 }
