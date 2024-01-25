@@ -637,53 +637,53 @@ void evaluate_post_turn_cuda(DataType *opponent_range,
     cudaFree(device_scratch);
 }
 }
-
-#include "builder.cu"
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <unistd.h>
-
-int main() {
-    Evaluator *device_evaluator;
-    cudaMalloc(&device_evaluator, sizeof(Evaluator));
-    Evaluator *evaluator = (Evaluator *) calloc(1, sizeof(Evaluator));
-    int file_evaluator = open("evaluator_test", O_RDWR | O_CREAT, 0666);
-    void *src = mmap(NULL, sizeof(Evaluator), PROT_READ | PROT_WRITE, MAP_SHARED, file_evaluator, 0);
-
-    memcpy(evaluator, src, sizeof(Evaluator));
-    munmap(src, sizeof(Evaluator));
-    close(file_evaluator);
-
-    cudaMemcpy(device_evaluator, evaluator, sizeof(Evaluator), cudaMemcpyHostToDevice);
-    DataType *range = (float *) calloc(1326, sizeof(DataType));
-    for (int i = 0; i < 1326; i++) {
-        if (evaluator->card_order[i] & 15l) {
-            range[i] = 0.0;
-        } else {
-            range[i] = 1.0;
-        }
-    }
-    int ns = 1;
-    State *states[ns];
-    for (int i = 0; i < ns; i++) {
-        states[i] = build_post_turn_cuda(15l, 1.0);
-    }
-    DataType *result = (float *) calloc(1326, sizeof(DataType));
-
-
-    for (int i = 0; i < ns; i++) {
-        evaluate_post_turn_cuda(range, states[i], device_evaluator, 0, result);
-    }
-
-    float sum = 0;
-    for (int i = 0; i < 1326; i++) {
-        sum += result[i];
-    }
-    printf("sum: %f\n", sum);
-    free(range);
-    free(result);
-    for (int i = 0; i < ns; i++) {
-        cudaFree(states[i]);
-    }
-    cudaFree(device_evaluator);
-}
+//
+//#include "builder.cu"
+//#include <fcntl.h>
+//#include <sys/mman.h>
+//#include <unistd.h>
+//
+//int main() {
+//    Evaluator *device_evaluator;
+//    cudaMalloc(&device_evaluator, sizeof(Evaluator));
+//    Evaluator *evaluator = (Evaluator *) calloc(1, sizeof(Evaluator));
+//    int file_evaluator = open("evaluator_test", O_RDWR | O_CREAT, 0666);
+//    void *src = mmap(NULL, sizeof(Evaluator), PROT_READ | PROT_WRITE, MAP_SHARED, file_evaluator, 0);
+//
+//    memcpy(evaluator, src, sizeof(Evaluator));
+//    munmap(src, sizeof(Evaluator));
+//    close(file_evaluator);
+//
+//    cudaMemcpy(device_evaluator, evaluator, sizeof(Evaluator), cudaMemcpyHostToDevice);
+//    DataType *range = (float *) calloc(1326, sizeof(DataType));
+//    for (int i = 0; i < 1326; i++) {
+//        if (evaluator->card_order[i] & 15l) {
+//            range[i] = 0.0;
+//        } else {
+//            range[i] = 1.0;
+//        }
+//    }
+//    int ns = 1;
+//    State *states[ns];
+//    for (int i = 0; i < ns; i++) {
+//        states[i] = build_post_turn_cuda(15l, 1.0);
+//    }
+//    DataType *result = (float *) calloc(1326, sizeof(DataType));
+//
+//
+//    for (int i = 0; i < ns; i++) {
+//        evaluate_post_turn_cuda(range, states[i], device_evaluator, 0, result);
+//    }
+//
+//    float sum = 0;
+//    for (int i = 0; i < 1326; i++) {
+//        sum += result[i];
+//    }
+//    printf("sum: %f\n", sum);
+//    free(range);
+//    free(result);
+//    for (int i = 0; i < ns; i++) {
+//        cudaFree(states[i]);
+//    }
+//    cudaFree(device_evaluator);
+//}
