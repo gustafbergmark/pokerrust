@@ -165,8 +165,6 @@ handle_collisions(int i, long communal_cards, short *eval, short *coll_vec,
         DataType group_sum = 0.0;
         for (int c = 0; c < 51; c++) {
             int index = coll_vec[offset + c];
-            // Skip impossible hands, unnecessary here, but consistent
-            if ((communal_cards & from_index(eval[index & 2047] & 2047)) > 0) continue;
             // 2048 bit set => new group
             if (index & 2048) {
                 sum += group_sum;
@@ -186,8 +184,6 @@ handle_collisions(int i, long communal_cards, short *eval, short *coll_vec,
         for (int c = 0; c < 51; c++) {
             // Go backwards
             int index = coll_vec[offset + 50 - c];
-            // Skip impossible hands
-            if ((communal_cards & from_index(eval[index & 2047] & 2047)) > 0) continue;
             // Reverse ordering, because reverse iteration
             atomicAdd(&sorted_eval[index & 2047], sum);
             group_sum += sorted_range[index & 2047];
@@ -216,11 +212,8 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, sh
         int index = i + 128 * b;
         if (index < 1326) {
             // reset values
-            sorted_range[index] = 0;
             sorted_eval[index] = 0;
             result[index] = 0;
-            // Impossible hand since overlap with communal cards
-            if ((communal_cards & from_index(eval[index] & 2047)) > 0) continue;
             sorted_range[index] = opponent_range[eval[index] & 2047];
         }
         if (index == 1326) {
@@ -244,7 +237,6 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, sh
         int index = i * 11 + b;
         if (index < 1326) {
             // Impossible hand since overlap with communal cards
-            if ((communal_cards & from_index(eval[index] & 2047)) > 0) continue;
             if (eval[index] & 2048) { prev_group = index; }
             DataType worse = sorted_range[prev_group];
             sorted_eval[index] += worse;
@@ -255,8 +247,6 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, sh
     for (int b = 10; b >= 0; b--) {
         int index = i * 11 + b;
         if (index < 1326) {
-            // Impossible hand since overlap with communal cards
-            if ((communal_cards & from_index(eval[index] & 2047)) > 0) continue;
             DataType better = sorted_range[1326] - sorted_range[next_group];
             sorted_eval[index] -= better;
             // Observe reverse order because of reverse iteration
@@ -297,13 +287,6 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, short 
     for (int b = 0; b < 11; b++) {
         int index = i + 128 * b;
         if (index < 1326) {
-            // reset values
-            range_sum[index] = 0;
-            // Because of inclusion-exclusion, we need to add the
-            // probability that the opponent got exactly the same hand
-            result[index] = 0;
-            // Impossible hand since overlap with communal cards
-            if (communal_cards & from_index(index)) continue;
             range_sum[index] = opponent_range[index];
             result[index] = opponent_range[index];
         }
@@ -319,21 +302,29 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, short 
         DataType card_sum = 0.0;
         for (int c = 0; c < 51; c++) {
             short index = card_indexes[i * 51 + c];
-            if (communal_cards & from_index(index)) continue;
             card_sum += opponent_range[index];
         }
         for (int c = 0; c < 51; c++) {
             short index = card_indexes[i * 51 + c];
-            if (communal_cards & from_index(index)) continue;
             atomicAdd(&result[index], -card_sum);
         }
     }
+//    else if (i < 104) {
+//        DataType card_sum = 0.0;
+//        for (int c = 26; c < 51; c++) {
+//            short index = card_indexes[(i-52) * 51 + c];
+//            card_sum += opponent_range[index];
+//        }
+//        for (int c = 26; c < 51; c++) {
+//            short index = card_indexes[(i-52) * 51 + c];
+//            atomicAdd(&result[index], -card_sum);
+//        }
+//    }
     __syncthreads();
 
     for (int b = 0; b < 11; b++) {
         int index = i + 128 * b;
         if (index < 1326) {
-            if (communal_cards & from_index(index)) continue;
             result[index] += total;
             if (updating_player == folding_player) {
                 result[index] *= -bet;
@@ -353,11 +344,13 @@ evaluate_fold_kernel(DataType *opponent_range, long communal_cards, short *card_
                                folding_player, bet, result, range_sum, temp);
 }
 
-__device__ void remove_collisions(Vector *vector, int card, short card_indexes[2652]) {
+__device__ void remove_collisions(Vector *vector, int card, Evaluator *evaluator) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if(tid < 51) {
-        short index = card_indexes[card*51 + tid];
-        vector->values[index] = 0.0f;
+    for (int b = 0; b < 11; b++) {
+        int index = tid + 128 * b;
+        if (index < 1326) {
+            if (from_index(index) & (1l << card)) vector->values[index] = 0.0f;
+        }
     }
     __syncthreads();
 }
@@ -379,6 +372,7 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
         Context *context = &contexts[depth];
         State *state = context->state;
         Vector *opponent_range = context->opponent_range;
+
         switch (state->terminal) {
             case Showdown : {
                 long set = state->cards ^ evaluator->flop;
@@ -457,26 +451,31 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                     zero(result);
                 } else {
                     // offset to next depths result
-                    int dealt_card = __ffsll(state->next_states[context->transition -1]->cards ^ state->cards)-1;
-                    remove_collisions(result+10, dealt_card, evaluator->card_indexes);
+                    int dealt_card = __ffsll(state->next_states[context->transition - 1]->cards ^ state->cards) - 1;
+                    remove_collisions(result + 10, dealt_card, evaluator);
                     add_assign(result, result + 10);
                 }
                 if (context->transition == context->state->transitions) {
                     for (int b = 0; b < 11; b++) {
                         int index = tid + 128 * b;
                         if (index < 1326) {
-                            result->values[index] /= ((DataType) state->transitions);
+                            if (from_index(index) & state->cards) {
+                                result->values[index] = 0.0;
+                            } else {
+                                result->values[index] /= ((DataType) state->transitions);
+                            }
                         }
                     }
                     depth--;
                 } else {
                     int i = context->transition;
                     State *next = state->next_states[i];
-                    int dealt_card = __ffsll(next->cards ^ state->cards)-1;
-                    Vector* new_range = scratch;
-                    scratch+=1;
+                    int dealt_card = __ffsll(next->cards ^ state->cards) - 1;
+                    //if(tid == 0) printf("dc %d old %lu new %lu\n", dealt_card, state->cards, next->cards);
+                    Vector *new_range = scratch;
+                    scratch += 1;
                     copy(opponent_range, new_range);
-                    remove_collisions(new_range, dealt_card, evaluator->card_indexes);
+                    remove_collisions(new_range, dealt_card, evaluator);
                     contexts[depth + 1] = {next, new_range, 0};
                     context->transition += 1;
                     depth++;
@@ -491,11 +490,21 @@ __global__ void evaluate_post_turn_kernel(Vector *opponent_range,
                                           Evaluator *evaluator,
                                           Player updating_player,
                                           Vector *scratch) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
     __shared__ DataType sorted_range[1327];
     __shared__ DataType sorted_eval[1326];
     __shared__ DataType temp[128];
     evaluate_post_turn_kernel_inner(opponent_range, state, evaluator, updating_player, scratch, sorted_range,
                                     sorted_eval, temp);
+    // Remove utility of impossible hands
+    for (int b = 0; b < 11; b++) {
+        int index = tid + 128 * b;
+        if (index < 1326) {
+            if (from_index(index) & state->cards) {
+                scratch->values[index] = 0.0;
+            }
+        }
+    }
 }
 
 double cpuSecond() {
@@ -611,47 +620,52 @@ void evaluate_post_turn_cuda(DataType *opponent_range,
 }
 }
 
-//#include "builder.cu"
-//#include <fcntl.h>
-//#include <sys/mman.h>
-//#include <unistd.h>
-//
-//int main() {
-//    DataType *range = (float *) calloc(1326, sizeof(DataType));
-//    for (int i = 0; i < 1326; i++) {
-//        range[i] = 1.0;
-//    }
-//    int ns = 1;
-//    State *states[ns];
-//    for (int i = 0; i < ns; i++) {
-//        states[i] = build_post_turn_cuda(15l, 1.0);
-//    }
-//    DataType *result = (float *) calloc(1326, sizeof(DataType));
-//    Evaluator *device_evaluator;
-//    cudaMalloc(&device_evaluator, sizeof(Evaluator));
-//    Evaluator *evaluator = (Evaluator *) calloc(1, sizeof(Evaluator));
-//    int file_evaluator = open("evaluator_test", O_RDWR | O_CREAT, 0666);
-//    void *src = mmap(NULL, sizeof(Evaluator), PROT_READ | PROT_WRITE, MAP_SHARED, file_evaluator, 0);
-//
-//    memcpy(evaluator, src, sizeof(Evaluator));
-//    munmap(src, sizeof(Evaluator));
-//    close(file_evaluator);
-//
-//    cudaMemcpy(device_evaluator, evaluator, sizeof(Evaluator), cudaMemcpyHostToDevice);
-//
-//    for (int i = 0; i < ns; i++) {
-//        evaluate_post_turn_cuda(range, states[i], device_evaluator, 0, result);
-//    }
-//
-//    float sum = 0;
-//    for (int i = 0; i < 1326; i++) {
-//        sum += result[i];
-//    }
-//    printf("sum: %f\n", sum);
-//    free(range);
-//    free(result);
-//    for (int i = 0; i < ns; i++) {
-//        cudaFree(states[i]);
-//    }
-//    cudaFree(device_evaluator);
-//}
+#include "builder.cu"
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+
+int main() {
+    Evaluator *device_evaluator;
+    cudaMalloc(&device_evaluator, sizeof(Evaluator));
+    Evaluator *evaluator = (Evaluator *) calloc(1, sizeof(Evaluator));
+    int file_evaluator = open("evaluator_test", O_RDWR | O_CREAT, 0666);
+    void *src = mmap(NULL, sizeof(Evaluator), PROT_READ | PROT_WRITE, MAP_SHARED, file_evaluator, 0);
+
+    memcpy(evaluator, src, sizeof(Evaluator));
+    munmap(src, sizeof(Evaluator));
+    close(file_evaluator);
+
+    cudaMemcpy(device_evaluator, evaluator, sizeof(Evaluator), cudaMemcpyHostToDevice);
+    DataType *range = (float *) calloc(1326, sizeof(DataType));
+    for (int i = 0; i < 1326; i++) {
+        if (evaluator->card_order[i] & 15l) {
+            range[i] = 0.0;
+        } else {
+            range[i] = 1.0;
+        }
+    }
+    int ns = 1;
+    State *states[ns];
+    for (int i = 0; i < ns; i++) {
+        states[i] = build_post_turn_cuda(15l, 1.0);
+    }
+    DataType *result = (float *) calloc(1326, sizeof(DataType));
+
+
+    for (int i = 0; i < ns; i++) {
+        evaluate_post_turn_cuda(range, states[i], device_evaluator, 0, result);
+    }
+
+    float sum = 0;
+    for (int i = 0; i < 1326; i++) {
+        sum += result[i];
+    }
+    printf("sum: %f\n", sum);
+    free(range);
+    free(result);
+    for (int i = 0; i < ns; i++) {
+        cudaFree(states[i]);
+    }
+    cudaFree(device_evaluator);
+}
