@@ -56,11 +56,4 @@ impl Strategy {
 
         regret_match
     }
-
-    fn normalize(v: &mut [Vector; 3]) {
-        let norm = v[0] + v[1] + v[2];
-        v[0] /= norm;
-        v[1] /= norm;
-        v[2] /= norm;
-    }
 }

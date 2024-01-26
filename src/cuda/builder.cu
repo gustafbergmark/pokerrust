@@ -140,38 +140,38 @@ build_post_turn_kernel(long cards, DataType bet, State *root, State *device_root
 
 
 extern "C" {
-void init() {
-    size_t *size = (size_t *) malloc(sizeof(size_t));
-    cudaDeviceGetLimit(size, cudaLimitStackSize);
-    printf("old stack size: %zu\n", *size);
-    cudaDeviceSetLimit(cudaLimitStackSize, 2 * 4096);
-    cudaDeviceGetLimit(size, cudaLimitStackSize);
-    printf("new stack size: %zu\n", *size);
-    fflush(stdout);
-}
-State *build_post_turn_cuda(long cards, DataType bet) {
+State **build_turn_cuda(long cards, DataType bet) {
     cudaError_t err;
-    int vector_index = 0;
-    int state_index = 0;
-    int state_size = sizeof(State) * (27 * 48 * 9 + 27);
-    State *root = (State *) malloc(state_size);
+    int count = 0;
+    State **states = (State **) calloc(49, sizeof(State *));
+    for (int c = 0; c < 52; c++) {
+        long turn = 1l << c;
+        if (cards & turn) continue;
+        long new_cards = cards | turn;
+        int vector_index = 0;
+        int state_index = 0;
+        int state_size = sizeof(State) * (27 * 48 * 9 + 27);
+        State *root = (State *) malloc(state_size);
 
-    State *device_root;
-    cudaMalloc(&device_root, state_size);
+        State *device_root;
+        cudaMalloc(&device_root, state_size);
 
-    Vector *vectors;
-    int vectors_size = sizeof(Vector) * (26 * 48 * 9 + 26);
-    cudaMalloc(&vectors, vectors_size);
-    cudaMemset(vectors, 0, vectors_size);
+        Vector *vectors;
+        int vectors_size = sizeof(Vector) * (26 * 48 * 9 + 26);
+        cudaMalloc(&vectors, vectors_size);
+        cudaMemset(vectors, 0, vectors_size);
 
-    build_post_turn_kernel(cards, bet, root, device_root, vectors, &state_index, &vector_index);
-    cudaMemcpy(device_root, root, state_size, cudaMemcpyHostToDevice);
-    cudaDeviceSynchronize();
-    err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("Build error: %s\n", cudaGetErrorString(err));
-        fflush(stdout);
+        build_post_turn_kernel(new_cards, bet, root, device_root, vectors, &state_index, &vector_index);
+        cudaMemcpy(device_root, root, state_size, cudaMemcpyHostToDevice);
+        cudaDeviceSynchronize();
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            printf("Build error: %s\n", cudaGetErrorString(err));
+            fflush(stdout);
+        }
+        states[count] = device_root;
+        count++;
     }
-    return device_root;
+    return states;
 }
 }

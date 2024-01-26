@@ -16,7 +16,7 @@ fn main() {
     //init_gpu();
     let mut game = builder::fixed_flop_poker();
     let start = Instant::now();
-    for i in 1..=1000 {
+    for i in 1..=10000 {
         game.perform_iter(i);
     }
     //dbg!(&game);

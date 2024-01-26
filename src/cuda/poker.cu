@@ -10,7 +10,6 @@
 #define ITERS 11
 
 
-
 __device__ void multiply(Vector *__restrict__ v1, Vector *__restrict__ v2, Vector *__restrict__ res) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     for (int b = 0; b < ITERS; b++) {
@@ -74,7 +73,7 @@ __device__ void zero(Vector *v) {
 
 __device__ void p_sum(DataType *input, int i) {
     int offset = 1;
-    for (int d = TPB/2; d > 0; d >>= 1) {
+    for (int d = TPB / 2; d > 0; d >>= 1) {
         __syncthreads();
         if (i < d) {
             int ai = offset * (2 * i + 1) - 1;
@@ -84,7 +83,7 @@ __device__ void p_sum(DataType *input, int i) {
         offset *= 2;
     }
     if (i == 0) {
-        input[TPB-1] = 0;
+        input[TPB - 1] = 0;
     }
     for (int d = 1; d < TPB; d *= 2) {
         offset >>= 1;
@@ -178,7 +177,7 @@ __device__ void update_strategy(State *__restrict__ state, Vector *__restrict__ 
 }
 
 __device__ void
-handle_collisions( long communal_cards, short *eval, short *coll_vec,
+handle_collisions(long communal_cards, short *eval, short *coll_vec,
                   DataType *sorted_range, DataType *sorted_eval) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     __syncthreads();
@@ -328,21 +327,21 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, short 
             card_sum += local_range[index];
         }
         atomicAdd(&temp[i], card_sum);
-    } else if ((i>=64) && (i < (64+52))){
+    } else if ((i >= 64) && (i < (64 + 52))) {
         for (int c = 26; c < 51; c++) {
-            short index = card_indexes[(i-64) * 51 + c];
+            short index = card_indexes[(i - 64) * 51 + c];
             card_sum += local_range[index];
         }
-        atomicAdd(&temp[i-64], card_sum);
+        atomicAdd(&temp[i - 64], card_sum);
     }
     __syncthreads();
     for (int b = 0; b < ITERS; b++) {
         int index = i + TPB * b;
         if (index < 1326) {
             long cards = from_index(index);
-            int card1 = __ffsll(cards)-1;
-            cards -= 1l<<card1;
-            int card2 = __ffsll(cards)-1;
+            int card1 = __ffsll(cards) - 1;
+            cards -= 1l << card1;
+            int card2 = __ffsll(cards) - 1;
             local_range[index] -= temp[card1] + temp[card2];
         }
     }
@@ -405,7 +404,8 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                 short *eval = evaluator->eval + eval_index * (1326 + 128 * 2);
                 short *coll_vec = evaluator->coll_vec + eval_index * 52 * 51;
                 evaluate_showdown_kernel_inner(opponent_range->values, state->cards, eval,
-                                               coll_vec, state->sbbet, (DataType *) scratch, (DataType*) (scratch+1), (DataType*) (scratch+2),
+                                               coll_vec, state->sbbet, (DataType *) scratch, (DataType *) (scratch + 1),
+                                               (DataType *) (scratch + 2),
                                                temp);
                 depth--;
             }
@@ -413,13 +413,15 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
             case SBWins :
                 evaluate_fold_kernel_inner(opponent_range->values, state->cards,
                                            evaluator->card_indexes,
-                                           updating_player, 1, state->bbbet, (DataType *) scratch, (DataType*) (scratch+1), temp);
+                                           updating_player, 1, state->bbbet, (DataType *) scratch,
+                                           (DataType *) (scratch + 1), temp);
                 depth--;
                 break;
             case BBWins :
                 evaluate_fold_kernel_inner(opponent_range->values, state->cards,
                                            evaluator->card_indexes,
-                                           updating_player, 0, state->sbbet, (DataType *) scratch, (DataType*) (scratch+1), temp);
+                                           updating_player, 0, state->sbbet, (DataType *) scratch,
+                                           (DataType *) (scratch + 1), temp);
                 depth--;
                 break;
             case NonTerminal : {
@@ -446,13 +448,14 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                     Vector *new_result = average_strategy + 10;
                     copy(new_result, results + i);
                     if (updating_player == state->next_to_act) {
-                        if(!calc_exploit) {
+                        if (!calc_exploit) {
                             fma(results + i, action_probs + i, average_strategy);
                         } else {
                             for (int b = 0; b < ITERS; b++) {
                                 int index = tid + TPB * b;
                                 if (index < 1326) {
-                                    average_strategy->values[index] = max(average_strategy->values[index], (results+i)->values[index]);
+                                    average_strategy->values[index] = max(average_strategy->values[index],
+                                                                          (results + i)->values[index]);
                                 }
                             }
                         }
@@ -536,7 +539,19 @@ __global__ void evaluate_post_turn_kernel(Vector *opponent_range,
                                           Vector *scratch) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     __shared__ DataType temp[128];
-    evaluate_post_turn_kernel_inner(opponent_range, state, evaluator, updating_player, calc_exploit,scratch,temp);
+
+    // Remove possibility of impossible hands
+    for (int b = 0; b < ITERS; b++) {
+        int index = tid + TPB * b;
+        if (index < 1326) {
+            if (from_index(index) & state->cards) {
+                opponent_range->values[index] = 0.0;
+            }
+        }
+    }
+
+    evaluate_post_turn_kernel_inner(opponent_range, state, evaluator, updating_player, calc_exploit, scratch, temp);
+
     // Remove utility of impossible hands
     for (int b = 0; b < ITERS; b++) {
         int index = tid + TPB * b;
@@ -644,7 +659,8 @@ void evaluate_post_turn_cuda(DataType *opponent_range,
     cudaMemset(device_scratch, 0, scratch_size);
     // Result will always be put in scratch[0..1326]
     double start = cpuSecond();
-    evaluate_post_turn_kernel<<<1, TPB>>>(device_opponent_range, state, evaluator, updating_player == 0 ? Small : Big, calc_exploit,
+    evaluate_post_turn_kernel<<<1, TPB>>>(device_opponent_range, state, evaluator, updating_player == 0 ? Small : Big,
+                                          calc_exploit,
                                           device_scratch);
 
     cudaMemcpy(result, device_scratch, 1326 * sizeof(DataType), cudaMemcpyDeviceToHost);
@@ -658,6 +674,62 @@ void evaluate_post_turn_cuda(DataType *opponent_range,
 
 
     cudaFree(device_opponent_range);
+    cudaFree(device_scratch);
+}
+
+void evaluate_turn_cuda(DataType *opponent_range,
+                        State **states,
+                        Evaluator *evaluator,
+                        short updating_player,
+                        bool calc_exploit,
+                        DataType *result) {
+    DataType *turns;
+    cudaMallocHost(&turns, 1326 * sizeof(DataType) * 49);
+    DataType *pinned_range;
+    cudaMallocHost(&pinned_range, 1326 * sizeof(DataType));
+    memcpy(pinned_range, opponent_range, 1326 * sizeof(DataType));
+    memset(result, 0, 1326 * sizeof(DataType));
+    cudaStream_t stream[49];
+    Vector *device_opponent_ranges;
+    cudaMalloc(&device_opponent_ranges, sizeof(Vector) * 49);
+
+    Vector *device_scratch;
+    int scratch_size = sizeof(Vector) * 10 * 14;
+    cudaMalloc(&device_scratch, scratch_size * 49);
+    cudaMemset(device_scratch, 0, scratch_size * 49);
+
+
+    for (int i = 0; i < 49; i++) cudaStreamCreate(&stream[i]);
+
+    for (int i = 0; i < 49; i++) {
+        State *state = states[i];
+        cudaMemcpyAsync(&device_opponent_ranges[i], pinned_range, 1326 * sizeof(DataType), cudaMemcpyHostToDevice,
+                        stream[i]);
+
+
+        // Result will always be put in scratch[0..1326]
+        evaluate_post_turn_kernel<<<1, TPB, 0, stream[i]>>>(&device_opponent_ranges[i], state, evaluator,
+                                                            updating_player == 0 ? Small : Big, calc_exploit,
+                                                            device_scratch + 10 * 14 * i);
+
+        cudaMemcpyAsync(turns + 1326 * i, device_scratch + 10 * 14 * i, 1326 * sizeof(DataType), cudaMemcpyDeviceToHost,
+                        stream[i]);
+    }
+
+    for (int i = 0; i < 49; i++) cudaStreamDestroy(stream[i]);
+
+    cudaDeviceSynchronize();
+    for (int j = 0; j < 1326; j++) {
+        for (int k = 0; k < 49; k++) {
+            result[j] += turns[k * 1326 + j];
+        }
+    }
+    for (int j = 0; j < 1326; j++) {
+        result[j] /= 49;
+    }
+    cudaFreeHost(turns);
+    cudaFreeHost(pinned_range);
+    cudaFree(device_opponent_ranges);
     cudaFree(device_scratch);
 }
 }

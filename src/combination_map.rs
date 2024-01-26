@@ -1,11 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::ops::Index;
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CombinationMap<T: Sized + Clone, const N: usize, const K: usize> {
     values: Vec<Option<T>>,
 }
-
+#[allow(unused)]
 impl<T: Sized + Clone, const N: usize, const K: usize> CombinationMap<T, N, K> {
     pub fn new() -> Self {
         assert!(N <= 64);

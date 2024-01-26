@@ -6,19 +6,19 @@ use poker::card;
 use std::fmt::{Debug, Formatter};
 use std::time::Instant;
 
-pub(crate) struct Game<'a> {
+pub(crate) struct Game {
     root: State,
-    evaluator: Evaluator<'a>,
+    evaluator: Evaluator,
 }
 
-impl Debug for Game<'_> {
+impl Debug for Game {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.root.fmt(f)
     }
 }
 
-impl<'a> Game<'a> {
-    pub fn new(root: State, evaluator: Evaluator<'a>) -> Self {
+impl Game {
+    pub fn new(root: State, evaluator: Evaluator) -> Self {
         let _kuhn_hands: Vec<u64> = vec![
             evaluator.cards_to_u64(&[card!(Jack, Hearts)]),
             evaluator.cards_to_u64(&[card!(Queen, Hearts)]),

@@ -2,23 +2,22 @@ use crate::combination_map::CombinationMap;
 use itertools::Itertools;
 use poker::{box_cards, Card};
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug)]
-pub struct Evaluator<'a> {
+pub struct Evaluator {
     // First 1326 are card orders, following 128 is start group indexes
     // for each gpu thread and last 128 is end next group index for each gpu thread
     card_order: Vec<u64>,
     card_indexes: Vec<u16>,
     vectorized_eval: CombinationMap<Vec<u16>, 52, 5>,
     collisions: CombinationMap<Vec<u16>, 52, 5>,
-    gpu_eval: CombinationMap<CombinationMap<(&'a Vec<u16>, &'a Vec<u16>), 52, 2>, 52, 3>,
+    //gpu_eval: CombinationMap<CombinationMap<(&'a Vec<u16>, &'a Vec<u16>), 52, 2>, 52, 3>,
     card_nums: HashMap<Card, u64>,
     num_cards: HashMap<u64, Card>,
 }
 #[allow(unused)]
-impl Evaluator<'_> {
+impl Evaluator {
     pub fn new() -> Self {
         let mut card_nums = HashMap::new();
         let mut num_cards = HashMap::new();
@@ -167,7 +166,7 @@ impl Evaluator<'_> {
             card_indexes,
             vectorized_eval,
             collisions,
-            gpu_eval: CombinationMap::new(),
+            //gpu_eval: CombinationMap::new(),
             card_nums,
             num_cards,
         }

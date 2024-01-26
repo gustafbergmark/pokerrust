@@ -1,13 +1,12 @@
 use crate::combination_map::CombinationMap;
 use crate::evaluator::Evaluator;
-use crate::vector::{Float, Vector};
+use crate::vector::Vector;
 use poker::Suit::*;
 use poker::{Card, Suit};
-use std::ops::Range;
 
 pub fn permute(permutation: [Suit; 4], v: Vector, evaluator: &Evaluator) -> Vector {
     let mut result = Vector::default();
-    let mut card_order: Vec<[Card; 2]> = evaluator
+    let card_order: Vec<[Card; 2]> = evaluator
         .card_order()
         .into_iter()
         .map(|&c| evaluator.u64_to_cards(c).try_into().unwrap())

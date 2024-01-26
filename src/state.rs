@@ -1,5 +1,5 @@
 use crate::cuda_interface::{
-    build_post_turn, evaluate_fold_gpu, evaluate_post_turn_gpu, evaluate_showdown_gpu, free_eval,
+    build_turn, evaluate_fold_gpu, evaluate_showdown_gpu, evaluate_turn_gpu, free_eval,
     transfer_flop_eval,
 };
 use crate::enums::Action::*;
@@ -14,8 +14,6 @@ use assert_approx_eq::assert_approx_eq;
 use itertools::Itertools;
 use poker::Suit::*;
 use poker::{Card, Suit};
-use rayon::iter::IntoParallelRefMutIterator;
-use rayon::iter::ParallelIterator;
 use std::collections::HashSet;
 use std::iter::zip;
 use std::time::Instant;
@@ -111,18 +109,21 @@ impl State {
                     permutations: vec![],
                     gpu_pointer: None,
                 }],
-                3 => vec![State {
-                    terminal: Turn,
-                    action,
-                    cards: self.cards,
-                    sbbet: other_bet,
-                    bbbet: other_bet,
-                    next_to_act: opponent,
-                    card_strategies: None,
-                    next_states: vec![],
-                    permutations: vec![],
-                    gpu_pointer: None,
-                }],
+                3 => {
+                    let gpu_pointer = Some(build_turn(self.cards, other_bet));
+                    vec![State {
+                        terminal: Turn,
+                        action,
+                        cards: self.cards,
+                        sbbet: other_bet,
+                        bbbet: other_bet,
+                        next_to_act: opponent,
+                        card_strategies: None,
+                        next_states: vec![],
+                        permutations: vec![],
+                        gpu_pointer,
+                    }]
+                }
                 4 => {
                     vec![State {
                         terminal: River,
@@ -233,8 +234,6 @@ impl State {
                     if num_turn & self.cards > 0 {
                         continue;
                     }
-                    let gpu_ptr = Some(build_post_turn(num_turn | self.cards, self.sbbet));
-                    //let gpu_ptr = None;
                     let next_state = State {
                         terminal: NonTerminal,
                         action: DealTurn,
@@ -245,7 +244,7 @@ impl State {
                         card_strategies: Some(Strategy::new()),
                         next_states: vec![],
                         permutations: vec![],
-                        gpu_pointer: gpu_ptr,
+                        gpu_pointer: None,
                     };
                     next_states.push(next_state);
                 }
@@ -339,30 +338,6 @@ impl State {
                         average_strategy += utility;
                     }
                 }
-                if self.action == DealTurn {
-                    let start = Instant::now();
-                    let gpu = evaluate_post_turn_gpu(
-                        self.gpu_pointer.expect("GPU state pointer missing"),
-                        gpu_eval_ptr.expect("GPU eval pointer missing"),
-                        opponent_range,
-                        updating_player,
-                        calc_exploit,
-                    );
-                    // for i in 0..1326 {
-                    //     //println!("{} {}", average_strategy[i], gpu[i]);
-                    //     assert_approx_eq!(average_strategy[i], gpu[i], 1e-1);
-                    //     // if (average_strategy[i] - gpu[i]).abs() > 1e-4 {
-                    //     //     dbg!(self.cards);
-                    //     //     dbg!(evaluator.u64_to_cards(self.cards));
-                    //     //     for j in 0..1326 {
-                    //     //         println!("{} {}", average_strategy[i], gpu[i]);
-                    //     //     }
-                    //     //     assert_approx_eq!(average_strategy[i], gpu[i], 1e-2);
-                    //     // }
-                    // }
-                    // //panic!("Once");
-                    // println!("COMPLETE {} micros", start.elapsed().as_micros());
-                }
                 // update strategy
                 if self.next_to_act == updating_player && !calc_exploit {
                     let mut update = [Vector::default(); 3];
@@ -414,31 +389,46 @@ impl State {
                 total * (1.0 / count)
             }
             Turn => {
-                let mut total = Vector::default();
-                for next_state in self.next_states.iter_mut() {
-                    let mut new_range = *opponent_range;
-                    // It is impossible to have hands which contains flop cards
-                    for i in 0..1326 {
-                        if (evaluator.card_order()[i] & next_state.cards) > 0 {
-                            new_range[i] = 0.0;
-                        }
-                    }
-                    let mut res = next_state.evaluate_state(
-                        &new_range,
-                        evaluator,
-                        updating_player,
-                        calc_exploit,
-                        gpu_eval_ptr,
-                    );
-                    // For safety for the future
-                    for i in 0..1326 {
-                        if (evaluator.card_order()[i] & next_state.cards) > 0 {
-                            res[i] = 0.0;
-                        }
-                    }
-                    total += res;
-                }
-                total * (1.0 / (self.next_states.len() as Float))
+                let _start = Instant::now();
+                let gpu = evaluate_turn_gpu(
+                    self.gpu_pointer.expect("GPU pointer missing"),
+                    gpu_eval_ptr.expect("GPU eval missing"),
+                    opponent_range,
+                    updating_player,
+                    calc_exploit,
+                );
+                //println!("COMPLETE {} micros", _start.elapsed().as_micros());
+                return gpu;
+                // let mut total = Vector::default();
+                // for next_state in self.next_states.iter_mut() {
+                //     let mut new_range = *opponent_range;
+                //     // It is impossible to have hands which contains flop cards
+                //     for i in 0..1326 {
+                //         if (evaluator.card_order()[i] & next_state.cards) > 0 {
+                //             new_range[i] = 0.0;
+                //         }
+                //     }
+                //     let mut res = next_state.evaluate_state(
+                //         &new_range,
+                //         evaluator,
+                //         updating_player,
+                //         calc_exploit,
+                //         gpu_eval_ptr,
+                //     );
+                //     // For safety for the future
+                //     for i in 0..1326 {
+                //         if (evaluator.card_order()[i] & next_state.cards) > 0 {
+                //             res[i] = 0.0;
+                //         }
+                //     }
+                //     total += res;
+                // }
+                // total *= 1.0 / (self.next_states.len() as Float);
+                //
+                // for i in 0..1326 {
+                //     assert_approx_eq!(total[i], gpu[i], 1e-4);
+                // }
+                // total
             }
             River => {
                 // Some parallelization
@@ -467,7 +457,7 @@ impl State {
         }
     }
 
-    fn evaluate_fold2(
+    fn evaluate_fold_test(
         &self,
         opponent_range: &Vector,
         evaluator: &Evaluator,
@@ -498,18 +488,9 @@ impl State {
             folding_player,
             bet,
         );
-        let mut sum = 0.0;
         for i in 0..1326 {
-            //println!("{} {} {}", i, correct[i], test[i]);
-            sum += test[i];
             assert_approx_eq!(correct[i], test[i], 1e-6);
         }
-        // println!(
-        //     "CPU sum: {} fp {} up {} bet {}",
-        //     sum, folding_player, updating_player, bet
-        // );
-        //panic!("Run once");
-        //println!("COMPLETE FOLD");
 
         correct
     }
@@ -558,7 +539,7 @@ impl State {
         result
     }
 
-    fn evaluate_showdown2(
+    fn evaluate_showdown_test(
         &self,
         opponent_range: &Vector,
         evaluator: &Evaluator,
@@ -581,11 +562,8 @@ impl State {
 
         let result = self.evaluate_showdown(opponent_range, evaluator, updating_player);
         for i in 0..1326 {
-            //println!("{} {} {}", i, result_gpu[i], result[i]);
             assert_approx_eq!(result_gpu[i], result[i], 1e-6);
         }
-        //panic!("Run once");
-        //println!("COMPLETE SHOWDOWN");
         result
     }
 

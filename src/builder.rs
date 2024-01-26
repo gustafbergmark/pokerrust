@@ -1,4 +1,3 @@
-use crate::cuda_interface::build_post_turn;
 use crate::enums::Action;
 use crate::enums::Action::*;
 use crate::enums::Player::*;
@@ -6,14 +5,11 @@ use crate::enums::TerminalState::*;
 use crate::evaluator::Evaluator;
 use crate::game::Game;
 use crate::state::State;
-use itertools::Itertools;
-use poker::Card;
-use std::thread::sleep;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 // A variant where the flop is fixed, and no raising the first two rounds of betting.
 // Should be about 1 GB in size
-pub(crate) fn fixed_flop_poker() -> Game<'static> {
+pub(crate) fn fixed_flop_poker() -> Game {
     let mut root = State::new(NonTerminal, DealHole, 0.5, 1.0, Small);
     let start = Instant::now();
     let evaluator = Evaluator::new();

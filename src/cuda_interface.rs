@@ -2,9 +2,9 @@ use crate::combination_map::CombinationMap;
 use crate::enums::Player;
 use crate::evaluator::Evaluator;
 use crate::vector::{Float, Vector};
+#[allow(unused)]
 extern "C" {
 
-    fn init();
     fn evaluate_showdown_cuda(
         opponent_range: *const Float,
         communal_cards: u64,
@@ -27,7 +27,7 @@ extern "C" {
         result: *mut Float,
     );
 
-    fn build_post_turn_cuda(cards: u64, bet: Float) -> *const std::ffi::c_void;
+    fn build_turn_cuda(cards: u64, bet: Float) -> *const std::ffi::c_void;
     fn transfer_flop_eval_cuda(
         flop: u64,
         card_order: *const u64,
@@ -37,9 +37,9 @@ extern "C" {
     ) -> *const std::ffi::c_void;
     fn free_eval_cuda(ptr: *const std::ffi::c_void);
 
-    fn evaluate_post_turn_cuda(
+    fn evaluate_turn_cuda(
         opponent_range: *const Float,
-        state: *const std::ffi::c_void,
+        states: *const std::ffi::c_void,
         evaluator: *const std::ffi::c_void,
         updating_player: u16,
         calc_exploit: bool,
@@ -47,6 +47,7 @@ extern "C" {
     );
 
 }
+#[allow(unused)]
 pub fn evaluate_showdown_gpu(
     opponent_range: &Vector,
     communal_cards: u64,
@@ -71,7 +72,7 @@ pub fn evaluate_showdown_gpu(
     }
     result
 }
-
+#[allow(unused)]
 pub fn evaluate_fold_gpu(
     opponent_range: &Vector,
     communal_cards: u64,
@@ -97,21 +98,15 @@ pub fn evaluate_fold_gpu(
     result
 }
 
-pub fn build_post_turn(cards: u64, bet: Float) -> *const std::ffi::c_void {
-    let ptr = unsafe { build_post_turn_cuda(cards, bet) };
-    ptr
+pub fn build_turn(cards: u64, bet: Float) -> *const std::ffi::c_void {
+    unsafe { build_turn_cuda(cards, bet) }
 }
-
-pub fn init_gpu() {
-    unsafe { init() };
-}
-
 pub fn transfer_flop_eval(eval: &Evaluator, communal_cards: u64) -> *const std::ffi::c_void {
     assert_eq!(communal_cards.count_ones(), 3);
     let mut evals = vec![];
     let mut collisions = vec![];
     let mut cards = 3;
-    for i in 0..1326 {
+    for _ in 0..1326 {
         if (communal_cards & cards) > 0 {
             let mut e = vec![0; 1326 + 128 * 2];
             evals.append(&mut e);
@@ -157,8 +152,8 @@ pub fn free_eval(ptr: *const std::ffi::c_void) {
     }
 }
 
-pub fn evaluate_post_turn_gpu(
-    state: *const std::ffi::c_void,
+pub fn evaluate_turn_gpu(
+    states: *const std::ffi::c_void,
     evaluator: *const std::ffi::c_void,
     opponent_range: &Vector,
     updating_player: Player,
@@ -170,9 +165,9 @@ pub fn evaluate_post_turn_gpu(
         Player::Big => 1,
     };
     unsafe {
-        evaluate_post_turn_cuda(
+        evaluate_turn_cuda(
             opponent_range.values.as_ptr(),
-            state,
+            states,
             evaluator,
             updating_player,
             calc_exploit,
