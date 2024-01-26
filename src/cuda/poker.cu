@@ -379,7 +379,7 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                                                 State *root_state,
                                                 Evaluator *evaluator,
                                                 Player updating_player,
-                                                Vector *scratch_root, DataType *sorted_eval,
+                                                Vector *scratch_root,
                                                 DataType *temp) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     Context contexts[14];
@@ -400,7 +400,7 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                 short *eval = evaluator->eval + eval_index * (1326 + 128 * 2);
                 short *coll_vec = evaluator->coll_vec + eval_index * 52 * 51;
                 evaluate_showdown_kernel_inner(opponent_range->values, state->cards, eval,
-                                               coll_vec, state->sbbet, (DataType *) scratch, (DataType*) (scratch+1), sorted_eval,
+                                               coll_vec, state->sbbet, (DataType *) scratch, (DataType*) (scratch+1), (DataType*) (scratch+2),
                                                temp);
                 depth--;
             }
@@ -408,13 +408,13 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
             case SBWins :
                 evaluate_fold_kernel_inner(opponent_range->values, state->cards,
                                            evaluator->card_indexes,
-                                           updating_player, 1, state->bbbet, (DataType *) scratch, sorted_eval, temp);
+                                           updating_player, 1, state->bbbet, (DataType *) scratch, (DataType*) (scratch+1), temp);
                 depth--;
                 break;
             case BBWins :
                 evaluate_fold_kernel_inner(opponent_range->values, state->cards,
                                            evaluator->card_indexes,
-                                           updating_player, 0, state->sbbet, (DataType *) scratch, sorted_eval, temp);
+                                           updating_player, 0, state->sbbet, (DataType *) scratch, (DataType*) (scratch+1), temp);
                 depth--;
                 break;
             case NonTerminal : {
@@ -511,10 +511,8 @@ __global__ void evaluate_post_turn_kernel(Vector *opponent_range,
                                           Player updating_player,
                                           Vector *scratch) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    __shared__ DataType sorted_eval[1326];
     __shared__ DataType temp[TPB];
-    evaluate_post_turn_kernel_inner(opponent_range, state, evaluator, updating_player, scratch,
-                                    sorted_eval, temp);
+    evaluate_post_turn_kernel_inner(opponent_range, state, evaluator, updating_player, scratch,temp);
     // Remove utility of impossible hands
     for (int b = 0; b < ITERS; b++) {
         int index = tid + TPB * b;
