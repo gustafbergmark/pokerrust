@@ -5,8 +5,12 @@
 #include "evaluator.cuh"
 #include <sys/time.h>
 
-#define TPB 128
-#define ITERS 11
+//#define TPB 128
+//#define ITERS 11
+//#define FRAGMENTS 1
+#define TPB 32
+#define ITERS 42
+#define FRAGMENTS 4
 
 __device__ void multiply(Vector *__restrict__ v1, Vector *__restrict__ v2, Vector *__restrict__ res) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -71,7 +75,7 @@ __device__ void zero(Vector *v) {
 
 __device__ void p_sum(DataType *input, int i) {
     int offset = 1;
-    for (int d = 64; d > 0; d >>= 1) {
+    for (int d = TPB/2; d > 0; d >>= 1) {
         __syncthreads();
         if (i < d) {
             int ai = offset * (2 * i + 1) - 1;
@@ -81,7 +85,7 @@ __device__ void p_sum(DataType *input, int i) {
         offset *= 2;
     }
     if (i == 0) {
-        input[127] = 0;
+        input[TPB-1] = 0;
     }
     for (int d = 1; d < TPB; d *= 2) {
         offset >>= 1;
@@ -175,8 +179,9 @@ __device__ void update_strategy(State *__restrict__ state, Vector *__restrict__ 
 }
 
 __device__ void
-handle_collisions(int i, long communal_cards, short *eval, short *coll_vec,
+handle_collisions( long communal_cards, short *eval, short *coll_vec,
                   DataType *sorted_range, DataType *sorted_eval) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
     __syncthreads();
     // Handle collisions before prefix sum consumes sorted_range
     // First two warps handles forward direction
@@ -243,7 +248,7 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, sh
     }
 
     // Handle card collisions
-    handle_collisions(i, communal_cards, eval, coll_vec, sorted_range, sorted_eval);
+    handle_collisions(communal_cards, eval, coll_vec, sorted_range, sorted_eval);
 
     // Calculate prefix sum
     cuda_prefix_sum(sorted_range, temp);
@@ -264,7 +269,7 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, sh
         }
     }
 
-    int next_group = eval[1326 + TPB + i];
+    int next_group = eval[1326 + 128 + i];
     for (int b = 10; b >= 0; b--) {
         int index = i * ITERS + b;
         if (index < 1326) {
@@ -511,7 +516,7 @@ __global__ void evaluate_post_turn_kernel(Vector *opponent_range,
                                           Player updating_player,
                                           Vector *scratch) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    __shared__ DataType temp[TPB];
+    __shared__ DataType temp[128];
     evaluate_post_turn_kernel_inner(opponent_range, state, evaluator, updating_player, scratch,temp);
     // Remove utility of impossible hands
     for (int b = 0; b < ITERS; b++) {
