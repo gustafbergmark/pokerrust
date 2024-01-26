@@ -4,6 +4,7 @@
 #include "structs.h"
 #include "evaluator.cuh"
 #include <sys/time.h>
+#include <cmath>
 
 #define TPB 128
 #define ITERS 11
@@ -382,6 +383,7 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                                                 State *root_state,
                                                 Evaluator *evaluator,
                                                 Player updating_player,
+                                                bool calc_exploit,
                                                 Vector *scratch_root,
                                                 DataType *temp) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -428,21 +430,39 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                 Vector *results = scratch;
                 scratch += state->transitions; // + state-> transitions
                 if (context->transition == 0) {
-                    zero(average_strategy);
+                    if ((updating_player == state->next_to_act) && calc_exploit) {
+                        for (int b = 0; b < ITERS; b++) {
+                            int index = tid + TPB * b;
+                            if (index < 1326) {
+                                average_strategy->values[index] = -INFINITY;
+                            }
+                        }
+                    } else {
+                        zero(average_strategy);
+                    }
                     get_strategy(state, scratch, action_probs);
                 } else {
                     int i = context->transition - 1;
                     Vector *new_result = average_strategy + 10;
                     copy(new_result, results + i);
                     if (updating_player == state->next_to_act) {
-                        fma(results + i, action_probs + i, average_strategy);
+                        if(!calc_exploit) {
+                            fma(results + i, action_probs + i, average_strategy);
+                        } else {
+                            for (int b = 0; b < ITERS; b++) {
+                                int index = tid + TPB * b;
+                                if (index < 1326) {
+                                    average_strategy->values[index] = max(average_strategy->values[index], (results+i)->values[index]);
+                                }
+                            }
+                        }
                     } else {
                         add_assign(average_strategy, results + i);
                     }
                 }
 
                 if (context->transition == context->state->transitions) {
-                    if (state->next_to_act == updating_player) {
+                    if ((state->next_to_act == updating_player) && !calc_exploit) {
                         for (int i = 0; i < state->transitions; i++) {
                             Vector *util = results + i;
                             sub_assign(util, average_strategy);
@@ -512,10 +532,11 @@ __global__ void evaluate_post_turn_kernel(Vector *opponent_range,
                                           State *state,
                                           Evaluator *evaluator,
                                           Player updating_player,
+                                          bool calc_exploit,
                                           Vector *scratch) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     __shared__ DataType temp[128];
-    evaluate_post_turn_kernel_inner(opponent_range, state, evaluator, updating_player, scratch,temp);
+    evaluate_post_turn_kernel_inner(opponent_range, state, evaluator, updating_player, calc_exploit,scratch,temp);
     // Remove utility of impossible hands
     for (int b = 0; b < ITERS; b++) {
         int index = tid + TPB * b;
@@ -609,6 +630,7 @@ void evaluate_post_turn_cuda(DataType *opponent_range,
                              State *state,
                              Evaluator *evaluator,
                              short updating_player,
+                             bool calc_exploit,
                              DataType *result) {
     Vector *device_opponent_range;
     cudaMalloc(&device_opponent_range, sizeof(Vector));
@@ -622,7 +644,7 @@ void evaluate_post_turn_cuda(DataType *opponent_range,
     cudaMemset(device_scratch, 0, scratch_size);
     // Result will always be put in scratch[0..1326]
     double start = cpuSecond();
-    evaluate_post_turn_kernel<<<1, TPB>>>(device_opponent_range, state, evaluator, updating_player == 0 ? Small : Big,
+    evaluate_post_turn_kernel<<<1, TPB>>>(device_opponent_range, state, evaluator, updating_player == 0 ? Small : Big, calc_exploit,
                                           device_scratch);
 
     cudaMemcpy(result, device_scratch, 1326 * sizeof(DataType), cudaMemcpyDeviceToHost);
@@ -640,6 +662,7 @@ void evaluate_post_turn_cuda(DataType *opponent_range,
 }
 }
 
+#ifdef TEST
 #include "builder.cu"
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -674,7 +697,7 @@ int main() {
 
 
     for (int i = 0; i < ns; i++) {
-        evaluate_post_turn_cuda(range, states[i], device_evaluator, 0, result);
+        evaluate_post_turn_cuda(range, states[i], device_evaluator, 0, false, result);
     }
 
     float sum = 0;
@@ -689,3 +712,4 @@ int main() {
     }
     cudaFree(device_evaluator);
 }
+#endif

@@ -42,6 +42,7 @@ extern "C" {
         state: *const std::ffi::c_void,
         evaluator: *const std::ffi::c_void,
         updating_player: u16,
+        calc_exploit: bool,
         result: *mut Float,
     );
 
@@ -161,6 +162,7 @@ pub fn evaluate_post_turn_gpu(
     evaluator: *const std::ffi::c_void,
     opponent_range: &Vector,
     updating_player: Player,
+    calc_exploit: bool,
 ) -> Vector {
     let mut result = Vector::default();
     let updating_player = match updating_player {
@@ -173,6 +175,7 @@ pub fn evaluate_post_turn_gpu(
             state,
             evaluator,
             updating_player,
+            calc_exploit,
             result.values.as_mut_ptr(),
         );
     }

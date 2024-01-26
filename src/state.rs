@@ -346,6 +346,7 @@ impl State {
                         gpu_eval_ptr.expect("GPU eval pointer missing"),
                         opponent_range,
                         updating_player,
+                        calc_exploit,
                     );
                     // for i in 0..1326 {
                     //     //println!("{} {}", average_strategy[i], gpu[i]);
