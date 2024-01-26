@@ -4,12 +4,14 @@
 #include "structs.h"
 #include "evaluator.cuh"
 #include <sys/time.h>
-// Everything expect a  dimension of 1x128, and vectors of size 1326 (most of the time)
+
+#define TPB 128
+#define ITERS 11
 
 __device__ void multiply(Vector *__restrict__ v1, Vector *__restrict__ v2, Vector *__restrict__ res) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    for (int b = 0; b < 11; b++) {
-        int index = i + 128 * b;
+    for (int b = 0; b < ITERS; b++) {
+        int index = i + TPB * b;
         if (index < 1326) {
             res->values[index] = v1->values[index] * v2->values[index];
         }
@@ -18,8 +20,8 @@ __device__ void multiply(Vector *__restrict__ v1, Vector *__restrict__ v2, Vecto
 
 __device__ void fma(Vector *__restrict__ v1, Vector *__restrict__ v2, Vector *__restrict__ res) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    for (int b = 0; b < 11; b++) {
-        int index = i + 128 * b;
+    for (int b = 0; b < ITERS; b++) {
+        int index = i + TPB * b;
         if (index < 1326) {
             res->values[index] += v1->values[index] * v2->values[index];
         }
@@ -28,8 +30,8 @@ __device__ void fma(Vector *__restrict__ v1, Vector *__restrict__ v2, Vector *__
 
 __device__ void add_assign(Vector *__restrict__ v1, Vector *__restrict__ v2) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    for (int b = 0; b < 11; b++) {
-        int index = i + 128 * b;
+    for (int b = 0; b < ITERS; b++) {
+        int index = i + TPB * b;
         if (index < 1326) {
             v1->values[index] += v2->values[index];
         }
@@ -38,8 +40,8 @@ __device__ void add_assign(Vector *__restrict__ v1, Vector *__restrict__ v2) {
 
 __device__ void sub_assign(Vector *__restrict__ v1, Vector *__restrict__ v2) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    for (int b = 0; b < 11; b++) {
-        int index = i + 128 * b;
+    for (int b = 0; b < ITERS; b++) {
+        int index = i + TPB * b;
         if (index < 1326) {
             v1->values[index] -= v2->values[index];
         }
@@ -48,8 +50,8 @@ __device__ void sub_assign(Vector *__restrict__ v1, Vector *__restrict__ v2) {
 
 __device__ void copy(Vector *__restrict__ from, Vector *__restrict__ into) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    for (int b = 0; b < 11; b++) {
-        int index = i + 128 * b;
+    for (int b = 0; b < ITERS; b++) {
+        int index = i + TPB * b;
         if (index < 1326) {
             into->values[index] = from->values[index];
         }
@@ -59,8 +61,8 @@ __device__ void copy(Vector *__restrict__ from, Vector *__restrict__ into) {
 
 __device__ void zero(Vector *v) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    for (int b = 0; b < 11; b++) {
-        int index = i + 128 * b;
+    for (int b = 0; b < ITERS; b++) {
+        int index = i + TPB * b;
         if (index < 1326) {
             v->values[index] = 0;
         }
@@ -81,7 +83,7 @@ __device__ void p_sum(DataType *input, int i) {
     if (i == 0) {
         input[127] = 0;
     }
-    for (int d = 1; d < 128; d *= 2) {
+    for (int d = 1; d < TPB; d *= 2) {
         offset >>= 1;
         __syncthreads();
         if (i < d) {
@@ -99,8 +101,8 @@ __device__ void cuda_prefix_sum(DataType *input, DataType *temp) {
     __syncthreads();
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     temp[i] = 0;
-    for (int b = 0; b < 11; b++) {
-        int index = i * 11 + b;
+    for (int b = 0; b < ITERS; b++) {
+        int index = i * ITERS + b;
         if (index < 1326 && i < 127) {
             temp[i] += input[index];
         }
@@ -108,8 +110,8 @@ __device__ void cuda_prefix_sum(DataType *input, DataType *temp) {
     p_sum(temp, i);
 
     DataType prefix = temp[i];
-    for (int b = 0; b < 11; b++) {
-        int index = i * 11 + b;
+    for (int b = 0; b < ITERS; b++) {
+        int index = i * ITERS + b;
         if (index < 1326) {
             DataType t = input[index];
             input[index] = prefix;
@@ -122,8 +124,8 @@ __device__ void cuda_prefix_sum(DataType *input, DataType *temp) {
 __device__ DataType reduce_sum(DataType *vector, DataType *temp) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     temp[i] = 0;
-    for (int b = 0; b < 11; b++) {
-        int index = i + 128 * b;
+    for (int b = 0; b < ITERS; b++) {
+        int index = i + TPB * b;
         if (index < 1326) {
             temp[i] += vector[index];
         }
@@ -146,8 +148,8 @@ __device__ void get_strategy(State *state, Vector *scratch, Vector *result) {
         add_assign(sum, state->card_strategies[i]);
     }
     for (int i = 0; i < state->transitions; i++) {
-        for (int b = 0; b < 11; b++) {
-            int index = tid + 128 * b;
+        for (int b = 0; b < ITERS; b++) {
+            int index = tid + TPB * b;
             if (index < 1326) {
                 if (sum->values[index] <= 1e-4) {
                     result[i].values[index] = 1.0 / ((DataType) state->transitions);
@@ -163,8 +165,8 @@ __device__ void update_strategy(State *__restrict__ state, Vector *__restrict__ 
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     for (int i = 0; i < state->transitions; i++) {
         add_assign(state->card_strategies[i], update + i);
-        for (int b = 0; b < 11; b++) {
-            int index = tid + 128 * b;
+        for (int b = 0; b < ITERS; b++) {
+            int index = tid + TPB * b;
             if (index < 1326) {
                 state->card_strategies[i]->values[index] = max(state->card_strategies[i]->values[index], 0.0);
             }
@@ -227,8 +229,8 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, sh
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     // Sort hands by eval
-    for (int b = 0; b < 11; b++) {
-        int index = i + 128 * b;
+    for (int b = 0; b < ITERS; b++) {
+        int index = i + TPB * b;
         if (index < 1326) {
             // reset values
             sorted_eval[index] = 0;
@@ -252,8 +254,8 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, sh
 
     // Calculate showdown value of all hands
     int prev_group = eval[1326 + i];
-    for (int b = 0; b < 11; b++) {
-        int index = i * 11 + b;
+    for (int b = 0; b < ITERS; b++) {
+        int index = i * ITERS + b;
         if (index < 1326) {
             // Impossible hand since overlap with communal cards
             if (eval[index] & 2048) { prev_group = index; }
@@ -262,9 +264,9 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, sh
         }
     }
 
-    int next_group = eval[1326 + 128 + i];
+    int next_group = eval[1326 + TPB + i];
     for (int b = 10; b >= 0; b--) {
-        int index = i * 11 + b;
+        int index = i * ITERS + b;
         if (index < 1326) {
             DataType better = sorted_range[1326] - sorted_range[next_group];
             sorted_eval[index] -= better;
@@ -275,8 +277,8 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, sh
 
     // Write result
     __syncthreads();
-    for (int b = 0; b < 11; b++) {
-        int index = i + 128 * b;
+    for (int b = 0; b < ITERS; b++) {
+        int index = i + TPB * b;
         if (index < 1326) {
             result[eval[index] & 2047] = sorted_eval[index] * bet;
         }
@@ -289,7 +291,7 @@ evaluate_showdown_kernel(DataType *opponent_range, long communal_cards, short *e
                          short *coll_vec, DataType bet, DataType *result, Evaluator *evaluator) {
     __shared__ DataType sorted_range[1327];
     __shared__ DataType sorted_eval[1326];
-    __shared__ DataType temp[128];
+    __shared__ DataType temp[TPB];
     evaluate_showdown_kernel_inner(opponent_range, communal_cards, eval, coll_vec, bet, result,
                                    sorted_range, sorted_eval, temp);
 }
@@ -303,8 +305,8 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, short 
     // Setup
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
-    for (int b = 0; b < 11; b++) {
-        int index = i + 128 * b;
+    for (int b = 0; b < ITERS; b++) {
+        int index = i + TPB * b;
         if (index < 1326) {
             local_range[index] = opponent_range[index];
             result[index] = opponent_range[index];
@@ -330,8 +332,8 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, short 
         atomicAdd(&temp[i-64], card_sum);
     }
     __syncthreads();
-    for (int b = 0; b < 11; b++) {
-        int index = i + 128 * b;
+    for (int b = 0; b < ITERS; b++) {
+        int index = i + TPB * b;
         if (index < 1326) {
             long cards = from_index(index);
             int card1 = __ffsll(cards)-1;
@@ -345,8 +347,8 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, short 
         bet = -bet;
     }
     total *= bet;
-    for (int b = 0; b < 11; b++) {
-        int index = i + 128 * b;
+    for (int b = 0; b < ITERS; b++) {
+        int index = i + TPB * b;
         if (index < 1326) {
             result[index] = local_range[index] * bet + total;
         }
@@ -357,15 +359,15 @@ __global__ void
 evaluate_fold_kernel(DataType *opponent_range, long communal_cards, short *card_indexes,
                      short updating_player, short folding_player, DataType bet, DataType *result) {
     __shared__ DataType range_sum[1326];
-    __shared__ DataType temp[128];
+    __shared__ DataType temp[TPB];
     evaluate_fold_kernel_inner(opponent_range, communal_cards, card_indexes, updating_player,
                                folding_player, bet, result, range_sum, temp);
 }
 
 __device__ void remove_collisions(Vector *vector, int card, Evaluator *evaluator) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    for (int b = 0; b < 11; b++) {
-        int index = tid + 128 * b;
+    for (int b = 0; b < ITERS; b++) {
+        int index = tid + TPB * b;
         if (index < 1326) {
             if (from_index(index) & (1l << card)) vector->values[index] = 0.0f;
         }
@@ -474,8 +476,8 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                     add_assign(result, result + 10);
                 }
                 if (context->transition == context->state->transitions) {
-                    for (int b = 0; b < 11; b++) {
-                        int index = tid + 128 * b;
+                    for (int b = 0; b < ITERS; b++) {
+                        int index = tid + TPB * b;
                         if (index < 1326) {
                             if (from_index(index) & state->cards) {
                                 result->values[index] = 0.0;
@@ -510,12 +512,12 @@ __global__ void evaluate_post_turn_kernel(Vector *opponent_range,
                                           Vector *scratch) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     __shared__ DataType sorted_eval[1326];
-    __shared__ DataType temp[128];
+    __shared__ DataType temp[TPB];
     evaluate_post_turn_kernel_inner(opponent_range, state, evaluator, updating_player, scratch,
                                     sorted_eval, temp);
     // Remove utility of impossible hands
-    for (int b = 0; b < 11; b++) {
-        int index = tid + 128 * b;
+    for (int b = 0; b < ITERS; b++) {
+        int index = tid + TPB * b;
         if (index < 1326) {
             if (from_index(index) & state->cards) {
                 scratch->values[index] = 0.0;
@@ -619,7 +621,7 @@ void evaluate_post_turn_cuda(DataType *opponent_range,
     cudaMemset(device_scratch, 0, scratch_size);
     // Result will always be put in scratch[0..1326]
     double start = cpuSecond();
-    evaluate_post_turn_kernel<<<1, 128>>>(device_opponent_range, state, evaluator, updating_player == 0 ? Small : Big,
+    evaluate_post_turn_kernel<<<1, TPB>>>(device_opponent_range, state, evaluator, updating_player == 0 ? Small : Big,
                                           device_scratch);
 
     cudaMemcpy(result, device_scratch, 1326 * sizeof(DataType), cudaMemcpyDeviceToHost);
@@ -636,7 +638,7 @@ void evaluate_post_turn_cuda(DataType *opponent_range,
     cudaFree(device_scratch);
 }
 }
-//
+
 //#include "builder.cu"
 //#include <fcntl.h>
 //#include <sys/mman.h>
