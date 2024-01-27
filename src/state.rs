@@ -1,7 +1,4 @@
-use crate::cuda_interface::{
-    build_turn, evaluate_fold_gpu, evaluate_showdown_gpu, evaluate_turn_gpu, free_eval,
-    transfer_flop_eval,
-};
+use crate::cuda_interface::{build_turn, evaluate_turn_gpu, free_eval, transfer_flop_eval};
 use crate::enums::Action::*;
 use crate::enums::Player::*;
 use crate::enums::TerminalState::*;
@@ -457,44 +454,6 @@ impl State {
         }
     }
 
-    fn evaluate_fold_test(
-        &self,
-        opponent_range: &Vector,
-        evaluator: &Evaluator,
-        updating_player: Player,
-        folding_player: Player,
-    ) -> Vector {
-        let correct =
-            self.evaluate_fold(opponent_range, evaluator, updating_player, folding_player);
-
-        let bet = match folding_player {
-            Small => self.sbbet,
-            Big => self.bbbet,
-        };
-        let updating_player = match updating_player {
-            Small => 0,
-            Big => 1,
-        };
-        let folding_player = match folding_player {
-            Small => 0,
-            Big => 1,
-        };
-        let test = evaluate_fold_gpu(
-            opponent_range,
-            self.cards,
-            evaluator.card_order(),
-            evaluator.card_indexes(),
-            updating_player,
-            folding_player,
-            bet,
-        );
-        for i in 0..1326 {
-            assert_approx_eq!(correct[i], test[i], 1e-6);
-        }
-
-        correct
-    }
-
     fn evaluate_fold(
         &self,
         opponent_range: &Vector,
@@ -536,34 +495,6 @@ impl State {
             } else {
                 1.0
             };
-        result
-    }
-
-    fn evaluate_showdown_test(
-        &self,
-        opponent_range: &Vector,
-        evaluator: &Evaluator,
-        updating_player: Player,
-        gpu_eval_ptr: Option<*const std::ffi::c_void>,
-    ) -> Vector {
-        assert_eq!(self.sbbet, self.bbbet);
-        let bet = self.sbbet;
-        let eval = evaluator.vectorized_eval(self.cards);
-        let coll = evaluator.collisions(self.cards);
-        let result_gpu = evaluate_showdown_gpu(
-            &opponent_range.clone(),
-            self.cards,
-            evaluator.card_order(),
-            eval,
-            coll,
-            bet,
-            gpu_eval_ptr.expect("Failed to unwrap gpu_ptr"),
-        );
-
-        let result = self.evaluate_showdown(opponent_range, evaluator, updating_player);
-        for i in 0..1326 {
-            assert_approx_eq!(result_gpu[i], result[i], 1e-6);
-        }
         result
     }
 
@@ -648,31 +579,6 @@ impl State {
                 collisions[i] += current_collisions[i] * self_bet;
             }
         }
-
-        // // Naive
-        // let peval = poker::Evaluator::new();
-        // let mut res = Vector::default();
-        // for (i1, &hand1) in card_order.iter().enumerate() {
-        //     for (i2, &hand2) in card_order.iter().enumerate() {
-        //         if hand1 & hand2 > 0 {
-        //             continue;
-        //         }
-        //         if (hand1 & self.cards > 0) || (hand2 & self.cards > 0) {
-        //             continue;
-        //         }
-        //         let hand1 = evaluator.u64_to_cards(hand1 | self.cards);
-        //         let hand2 = evaluator.u64_to_cards(hand2 | self.cards);
-        //         if (peval.evaluate(&hand1).unwrap() > peval.evaluate(&hand2).unwrap()) {
-        //             res[i1] += opponent_range[i2] * opponent_bet;
-        //         } else if (peval.evaluate(&hand1).unwrap() < peval.evaluate(&hand2).unwrap()) {
-        //             res[i1] -= opponent_range[i2] * self_bet;
-        //         };
-        //     }
-        // }
-        // for i in 0..1326 {
-        //     assert_approx_eq!(res[i], result[i], 1e-3);
-        // }
-        // println!("Naive and CPU same");
         result
     }
 }

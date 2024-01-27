@@ -178,7 +178,7 @@ __device__ void update_strategy(State *__restrict__ state, Vector *__restrict__ 
 }
 
 __device__ void
-handle_collisions(long communal_cards, short *eval, short *coll_vec,
+handle_collisions(short *coll_vec,
                   DataType *sorted_range, DataType *sorted_eval) {
     int i = threadIdx.x;
     __syncthreads();
@@ -224,10 +224,10 @@ handle_collisions(long communal_cards, short *eval, short *coll_vec,
 }
 
 __device__ void
-evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, short *eval,
-                               short *coll_vec, DataType bet, DataType *result, DataType *sorted_range,
-                               DataType *sorted_eval,
-                               DataType *temp) {
+evaluate_showdown_kernel(DataType *opponent_range, long communal_cards, short *eval,
+                         short *coll_vec, DataType bet, DataType *result, DataType *sorted_range,
+                         DataType *sorted_eval,
+                         DataType *temp) {
     __syncthreads();
     // Setup
     int i = threadIdx.x;
@@ -247,7 +247,7 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, sh
     }
 
     // Handle card collisions
-    handle_collisions(communal_cards, eval, coll_vec, sorted_range, sorted_eval);
+    handle_collisions(coll_vec, sorted_range, sorted_eval);
 
     // Calculate prefix sum
     cuda_prefix_sum(sorted_range, temp);
@@ -290,21 +290,12 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, sh
     __syncthreads();
 }
 
-__global__ void
-evaluate_showdown_kernel(DataType *opponent_range, long communal_cards, short *eval,
-                         short *coll_vec, DataType bet, DataType *result, Evaluator *evaluator) {
-    __shared__ DataType sorted_range[1327];
-    __shared__ DataType sorted_eval[1326];
-    __shared__ DataType temp[TPB];
-    evaluate_showdown_kernel_inner(opponent_range, communal_cards, eval, coll_vec, bet, result,
-                                   sorted_range, sorted_eval, temp);
-}
 
 __device__ void
-evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, short *card_indexes,
-                           short updating_player, short folding_player, DataType bet, DataType *result,
-                           DataType *local_range,
-                           DataType *temp) {
+evaluate_fold_kernel(DataType *opponent_range, long communal_cards, short *card_indexes,
+                     short updating_player, short folding_player, DataType bet, DataType *result,
+                     DataType *local_range,
+                     DataType *temp) {
     __syncthreads();
     // Setup
     int i = threadIdx.x;
@@ -359,15 +350,6 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, short 
     }
 }
 
-__global__ void
-evaluate_fold_kernel(DataType *opponent_range, long communal_cards, short *card_indexes,
-                     short updating_player, short folding_player, DataType bet, DataType *result) {
-    __shared__ DataType range_sum[1326];
-    __shared__ DataType temp[TPB];
-    evaluate_fold_kernel_inner(opponent_range, communal_cards, card_indexes, updating_player,
-                               folding_player, bet, result, range_sum, temp);
-}
-
 __device__ void remove_collisions(Vector *vector, int card, Evaluator *evaluator) {
     int tid = threadIdx.x;
     for (int b = 0; b < ITERS; b++) {
@@ -415,25 +397,25 @@ __global__ void evaluate_post_turn_kernel(Vector *opponent_range_root,
                 int eval_index = get_index(set);
                 short *eval = evaluator->eval + eval_index * (1326 + 128 * 2);
                 short *coll_vec = evaluator->coll_vec + eval_index * 52 * 51;
-                evaluate_showdown_kernel_inner(opponent_range->values, state->cards, eval,
-                                               coll_vec, state->sbbet, (DataType *) scratch, (DataType *) (scratch + 1),
-                                               (DataType *) (scratch + 2),
-                                               temp);
+                evaluate_showdown_kernel(opponent_range->values, state->cards, eval,
+                                         coll_vec, state->sbbet, (DataType *) scratch, (DataType *) (scratch + 1),
+                                         (DataType *) (scratch + 2),
+                                         temp);
                 depth--;
             }
                 break;
             case SBWins :
-                evaluate_fold_kernel_inner(opponent_range->values, state->cards,
-                                           evaluator->card_indexes,
-                                           updating_player, 1, state->bbbet, (DataType *) scratch,
-                                           (DataType *) (scratch + 1), temp);
+                evaluate_fold_kernel(opponent_range->values, state->cards,
+                                     evaluator->card_indexes,
+                                     updating_player, 1, state->bbbet, (DataType *) scratch,
+                                     (DataType *) (scratch + 1), temp);
                 depth--;
                 break;
             case BBWins :
-                evaluate_fold_kernel_inner(opponent_range->values, state->cards,
-                                           evaluator->card_indexes,
-                                           updating_player, 0, state->sbbet, (DataType *) scratch,
-                                           (DataType *) (scratch + 1), temp);
+                evaluate_fold_kernel(opponent_range->values, state->cards,
+                                     evaluator->card_indexes,
+                                     updating_player, 0, state->sbbet, (DataType *) scratch,
+                                     (DataType *) (scratch + 1), temp);
                 depth--;
                 break;
             case NonTerminal : {
@@ -558,112 +540,6 @@ double cpuSecond() {
 }
 
 extern "C" {
-void evaluate_showdown_cuda(DataType *opponent_range, long communal_cards, long *card_order, short *eval,
-                            short *coll_vec, DataType bet, DataType *result, Evaluator *evaluator) {
-    DataType *device_opponent_range;
-    cudaMalloc(&device_opponent_range, 1326 * sizeof(DataType));
-    cudaMemcpy(device_opponent_range, opponent_range, 1326 * sizeof(DataType), cudaMemcpyHostToDevice);
-
-    DataType *device_result;
-    cudaMalloc(&device_result, 1326 * sizeof(DataType));
-
-    long *device_card_order;
-    cudaMalloc(&device_card_order, 1326 * sizeof(long));
-    cudaMemcpy(device_card_order, card_order, 1326 * sizeof(long), cudaMemcpyHostToDevice);
-
-    short *device_eval;
-    cudaMalloc(&device_eval, (1326 + 128 * 2) * sizeof(short));
-    cudaMemcpy(device_eval, eval, (1326 + 128 * 2) * sizeof(short), cudaMemcpyHostToDevice);
-
-    short *device_coll_vec;
-    cudaMalloc(&device_coll_vec, 52 * 51 * sizeof(short));
-    cudaMemcpy(device_coll_vec, coll_vec, 52 * 51 * sizeof(short), cudaMemcpyHostToDevice);
-
-    evaluate_showdown_kernel<<<1, 128>>>(device_opponent_range, communal_cards, device_eval,
-                                         device_coll_vec, bet, device_result, evaluator);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess)
-        printf("Error: %s\n", cudaGetErrorString(err));
-    cudaDeviceSynchronize();
-    fflush(stdout);
-    cudaMemcpy(result, device_result, 1326 * sizeof(DataType), cudaMemcpyDeviceToHost);
-
-    cudaFree(device_opponent_range);
-    cudaFree(device_result);
-    cudaFree(device_card_order);
-    cudaFree(device_eval);
-    cudaFree(device_coll_vec);
-}
-
-void evaluate_fold_cuda(DataType *opponent_range, long communal_cards, long *card_order, short *card_indexes,
-                        short updating_player,
-                        short folding_player, DataType bet, DataType *result) {
-    DataType *device_opponent_range;
-    cudaMalloc(&device_opponent_range, 1326 * sizeof(DataType));
-    cudaMemcpy(device_opponent_range, opponent_range, 1326 * sizeof(DataType), cudaMemcpyHostToDevice);
-
-    DataType *device_result;
-    cudaMalloc(&device_result, 1326 * sizeof(DataType));
-
-    long *device_card_order;
-    cudaMalloc(&device_card_order, 1326 * sizeof(long));
-    cudaMemcpy(device_card_order, card_order, 1326 * sizeof(long), cudaMemcpyHostToDevice);
-
-    short *device_card_indexes;
-    cudaMalloc(&device_card_indexes, 52 * 51 * sizeof(short));
-    cudaMemcpy(device_card_indexes, card_indexes, 52 * 51 * sizeof(short), cudaMemcpyHostToDevice);
-
-    evaluate_fold_kernel<<<1, 128>>>(device_opponent_range, communal_cards, device_card_indexes,
-                                     updating_player, folding_player, bet, device_result);
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess)
-        printf("Error: %s\n", cudaGetErrorString(err));
-
-    cudaDeviceSynchronize();
-    cudaMemcpy(result, device_result, 1326 * sizeof(DataType), cudaMemcpyDeviceToHost);
-
-    cudaFree(device_opponent_range);
-    cudaFree(device_result);
-    cudaFree(device_card_order);
-    cudaFree(device_card_indexes);
-}
-
-void evaluate_post_turn_cuda(DataType *opponent_range,
-                             State *state,
-                             Evaluator *evaluator,
-                             short updating_player,
-                             bool calc_exploit,
-                             DataType *result) {
-    Vector *device_opponent_range;
-    cudaMalloc(&device_opponent_range, sizeof(Vector));
-    cudaMemcpy(device_opponent_range, opponent_range, 1326 * sizeof(DataType), cudaMemcpyHostToDevice);
-
-
-    Vector *device_scratch;
-    // Max depth less than 14 i think, and max 8 vecs allocated per level
-    int scratch_size = sizeof(Vector) * 10 * 14;
-    cudaMalloc(&device_scratch, scratch_size);
-    cudaMemset(device_scratch, 0, scratch_size);
-    // Result will always be put in scratch[0..1326]
-    double start = cpuSecond();
-    evaluate_post_turn_kernel<<<1, TPB>>>(device_opponent_range, state, evaluator, updating_player == 0 ? Small : Big,
-                                          calc_exploit,
-                                          device_scratch);
-
-    cudaMemcpy(result, device_scratch, 1326 * sizeof(DataType), cudaMemcpyDeviceToHost);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("Error: %s\n", cudaGetErrorString(err));
-    }
-    double elapsed = cpuSecond() - start;
-    printf("Kernel time: %fs\n", elapsed);
-    fflush(stdout);
-
-
-    cudaFree(device_opponent_range);
-    cudaFree(device_scratch);
-}
 
 void evaluate_turn_cuda(DataType *opponent_range,
                         State **states,
@@ -693,13 +569,10 @@ void evaluate_turn_cuda(DataType *opponent_range,
         State *state = states[i];
         cudaMemcpyAsync(&device_opponent_ranges[i], pinned_range, 1326 * sizeof(DataType), cudaMemcpyHostToDevice,
                         stream[i]);
-
-
         // Result will always be put in scratch[0..1326]
         evaluate_post_turn_kernel<<<1, TPB, 0, stream[i]>>>(&device_opponent_ranges[i], state, evaluator,
                                                             updating_player == 0 ? Small : Big, calc_exploit,
                                                             device_scratch + 10 * 14 * i);
-
         cudaMemcpyAsync(turns + 1326 * i, device_scratch + 10 * 14 * i, 1326 * sizeof(DataType), cudaMemcpyDeviceToHost,
                         stream[i]);
     }
@@ -727,6 +600,7 @@ void evaluate_turn_cuda(DataType *opponent_range,
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <thread>
 
 int main() {
     Evaluator *device_evaluator;
@@ -753,16 +627,21 @@ int main() {
 
     DataType *result = (float *) calloc(1326, sizeof(DataType));
 
+    double start = cpuSecond();
 
+    int THREADS = 100;
+    std::thread threads[THREADS];
+    for(int i = 0; i < THREADS; i++) threads[i] = std::thread(evaluate_turn_cuda, range, states, device_evaluator, 0, true, result);
+    for(int i = 0; i < THREADS; i++) threads[i].join();
 
-    evaluate_turn_cuda(range, states, device_evaluator, 0, false, result);
+    double elapsed = cpuSecond() - start;
 
 
     float sum = 0;
     for (int i = 0; i < 1326; i++) {
         sum += result[i];
     }
-    printf("sum: %f\n", sum);
+    printf("sum: %f elapsed: %f\n", sum, elapsed);
     free(range);
     free(result);
     for (int i = 0; i < 49; i++) {
