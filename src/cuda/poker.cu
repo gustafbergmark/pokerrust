@@ -11,7 +11,7 @@
 
 
 __device__ void multiply(Vector *__restrict__ v1, Vector *__restrict__ v2, Vector *__restrict__ res) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = threadIdx.x;
     for (int b = 0; b < ITERS; b++) {
         int index = i + TPB * b;
         if (index < 1326) {
@@ -21,7 +21,7 @@ __device__ void multiply(Vector *__restrict__ v1, Vector *__restrict__ v2, Vecto
 }
 
 __device__ void fma(Vector *__restrict__ v1, Vector *__restrict__ v2, Vector *__restrict__ res) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = threadIdx.x;
     for (int b = 0; b < ITERS; b++) {
         int index = i + TPB * b;
         if (index < 1326) {
@@ -31,7 +31,7 @@ __device__ void fma(Vector *__restrict__ v1, Vector *__restrict__ v2, Vector *__
 }
 
 __device__ void add_assign(Vector *__restrict__ v1, Vector *__restrict__ v2) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = threadIdx.x;
     for (int b = 0; b < ITERS; b++) {
         int index = i + TPB * b;
         if (index < 1326) {
@@ -41,7 +41,7 @@ __device__ void add_assign(Vector *__restrict__ v1, Vector *__restrict__ v2) {
 }
 
 __device__ void sub_assign(Vector *__restrict__ v1, Vector *__restrict__ v2) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = threadIdx.x;
     for (int b = 0; b < ITERS; b++) {
         int index = i + TPB * b;
         if (index < 1326) {
@@ -51,7 +51,7 @@ __device__ void sub_assign(Vector *__restrict__ v1, Vector *__restrict__ v2) {
 }
 
 __device__ void copy(Vector *__restrict__ from, Vector *__restrict__ into) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = threadIdx.x;
     for (int b = 0; b < ITERS; b++) {
         int index = i + TPB * b;
         if (index < 1326) {
@@ -62,7 +62,7 @@ __device__ void copy(Vector *__restrict__ from, Vector *__restrict__ into) {
 
 
 __device__ void zero(Vector *v) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = threadIdx.x;
     for (int b = 0; b < ITERS; b++) {
         int index = i + TPB * b;
         if (index < 1326) {
@@ -101,7 +101,7 @@ __device__ void p_sum(DataType *input, int i) {
 
 __device__ void cuda_prefix_sum(DataType *input, DataType *temp) {
     __syncthreads();
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = threadIdx.x;
     temp[i] = 0;
     for (int b = 0; b < ITERS; b++) {
         int index = i * ITERS + b;
@@ -124,7 +124,7 @@ __device__ void cuda_prefix_sum(DataType *input, DataType *temp) {
 }
 
 __device__ DataType reduce_sum(DataType *vector, DataType *temp) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = threadIdx.x;
     temp[i] = 0;
     for (int b = 0; b < ITERS; b++) {
         int index = i + TPB * b;
@@ -143,18 +143,19 @@ __device__ DataType reduce_sum(DataType *vector, DataType *temp) {
 }
 
 __device__ void get_strategy(State *state, Vector *scratch, Vector *result) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int tid = threadIdx.x;
     Vector *sum = scratch;
     zero(sum);
-    for (int i = 0; i < state->transitions; i++) {
+    int transitions = state->transitions;
+    for (int i = 0; i < transitions; i++) {
         add_assign(sum, state->card_strategies[i]);
     }
-    for (int i = 0; i < state->transitions; i++) {
+    for (int i = 0; i < transitions; i++) {
         for (int b = 0; b < ITERS; b++) {
             int index = tid + TPB * b;
             if (index < 1326) {
                 if (sum->values[index] <= 1e-4) {
-                    result[i].values[index] = 1.0 / ((DataType) state->transitions);
+                    result[i].values[index] = 1.0 / ((DataType) transitions);
                 } else {
                     result[i].values[index] = state->card_strategies[i]->values[index] / sum->values[index];
                 }
@@ -164,7 +165,7 @@ __device__ void get_strategy(State *state, Vector *scratch, Vector *result) {
 }
 
 __device__ void update_strategy(State *__restrict__ state, Vector *__restrict__ update) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int tid = threadIdx.x;
     for (int i = 0; i < state->transitions; i++) {
         add_assign(state->card_strategies[i], update + i);
         for (int b = 0; b < ITERS; b++) {
@@ -179,7 +180,7 @@ __device__ void update_strategy(State *__restrict__ state, Vector *__restrict__ 
 __device__ void
 handle_collisions(long communal_cards, short *eval, short *coll_vec,
                   DataType *sorted_range, DataType *sorted_eval) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = threadIdx.x;
     __syncthreads();
     // Handle collisions before prefix sum consumes sorted_range
     // First two warps handles forward direction
@@ -229,7 +230,7 @@ evaluate_showdown_kernel_inner(DataType *opponent_range, long communal_cards, sh
                                DataType *temp) {
     __syncthreads();
     // Setup
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = threadIdx.x;
 
     // Sort hands by eval
     for (int b = 0; b < ITERS; b++) {
@@ -306,7 +307,7 @@ evaluate_fold_kernel_inner(DataType *opponent_range, long communal_cards, short 
                            DataType *temp) {
     __syncthreads();
     // Setup
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = threadIdx.x;
 
     for (int b = 0; b < ITERS; b++) {
         int index = i + TPB * b;
@@ -368,7 +369,7 @@ evaluate_fold_kernel(DataType *opponent_range, long communal_cards, short *card_
 }
 
 __device__ void remove_collisions(Vector *vector, int card, Evaluator *evaluator) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int tid = threadIdx.x;
     for (int b = 0; b < ITERS; b++) {
         int index = tid + TPB * b;
         if (index < 1326) {
@@ -378,14 +379,24 @@ __device__ void remove_collisions(Vector *vector, int card, Evaluator *evaluator
     __syncthreads();
 }
 
-__device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
+__global__ void evaluate_post_turn_kernel(Vector *opponent_range_root,
                                                 State *root_state,
                                                 Evaluator *evaluator,
                                                 Player updating_player,
                                                 bool calc_exploit,
-                                                Vector *scratch_root,
-                                                DataType *temp) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+                                                Vector *scratch_root) {
+    int tid = threadIdx.x;
+    __shared__ DataType temp[128];
+
+    // Remove possibility of impossible hands
+    for (int b = 0; b < ITERS; b++) {
+        int index = tid + TPB * b;
+        if (index < 1326) {
+            if (from_index(index) & root_state->cards) {
+                opponent_range_root->values[index] = 0.0;
+            }
+        }
+    }
     Context contexts[14];
     contexts[0] = {root_state, opponent_range_root, 0};
     int depth = 0;
@@ -396,6 +407,7 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
         Context *context = &contexts[depth];
         State *state = context->state;
         Vector *opponent_range = context->opponent_range;
+        int transitions = state->transitions;
 
         switch (state->terminal) {
             case Showdown : {
@@ -428,9 +440,9 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                 Vector *average_strategy = scratch;
                 scratch += 1;
                 Vector *action_probs = scratch;
-                scratch += state->transitions; // + state->transitions
+                scratch += transitions; // + transitions
                 Vector *results = scratch;
-                scratch += state->transitions; // + state-> transitions
+                scratch += transitions; // + state-> transitions
                 if (context->transition == 0) {
                     if ((updating_player == state->next_to_act) && calc_exploit) {
                         for (int b = 0; b < ITERS; b++) {
@@ -464,9 +476,9 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                     }
                 }
 
-                if (context->transition == context->state->transitions) {
+                if (context->transition == transitions) {
                     if ((state->next_to_act == updating_player) && !calc_exploit) {
-                        for (int i = 0; i < state->transitions; i++) {
+                        for (int i = 0; i < transitions; i++) {
                             Vector *util = results + i;
                             sub_assign(util, average_strategy);
                         }
@@ -501,14 +513,14 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                     remove_collisions(result + 10, dealt_card, evaluator);
                     add_assign(result, result + 10);
                 }
-                if (context->transition == context->state->transitions) {
+                if (context->transition == transitions) {
                     for (int b = 0; b < ITERS; b++) {
                         int index = tid + TPB * b;
                         if (index < 1326) {
                             if (from_index(index) & state->cards) {
                                 result->values[index] = 0.0;
                             } else {
-                                result->values[index] /= ((DataType) state->transitions);
+                                result->values[index] /= ((DataType) transitions);
                             }
                         }
                     }
@@ -517,7 +529,6 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                     int i = context->transition;
                     State *next = state->next_states[i];
                     int dealt_card = __ffsll(next->cards ^ state->cards) - 1;
-                    //if(tid == 0) printf("dc %d old %lu new %lu\n", dealt_card, state->cards, next->cards);
                     Vector *new_range = scratch;
                     scratch += 1;
                     copy(opponent_range, new_range);
@@ -529,35 +540,12 @@ __device__ void evaluate_post_turn_kernel_inner(Vector *opponent_range_root,
                 break;
         }
     }
-}
-
-__global__ void evaluate_post_turn_kernel(Vector *opponent_range,
-                                          State *state,
-                                          Evaluator *evaluator,
-                                          Player updating_player,
-                                          bool calc_exploit,
-                                          Vector *scratch) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    __shared__ DataType temp[128];
-
-    // Remove possibility of impossible hands
-    for (int b = 0; b < ITERS; b++) {
-        int index = tid + TPB * b;
-        if (index < 1326) {
-            if (from_index(index) & state->cards) {
-                opponent_range->values[index] = 0.0;
-            }
-        }
-    }
-
-    evaluate_post_turn_kernel_inner(opponent_range, state, evaluator, updating_player, calc_exploit, scratch, temp);
-
     // Remove utility of impossible hands
     for (int b = 0; b < ITERS; b++) {
         int index = tid + TPB * b;
         if (index < 1326) {
-            if (from_index(index) & state->cards) {
-                scratch->values[index] = 0.0;
+            if (from_index(index) & root_state->cards) {
+                scratch_root->values[index] = 0.0;
             }
         }
     }
@@ -754,23 +742,21 @@ int main() {
     cudaMemcpy(device_evaluator, evaluator, sizeof(Evaluator), cudaMemcpyHostToDevice);
     DataType *range = (float *) calloc(1326, sizeof(DataType));
     for (int i = 0; i < 1326; i++) {
-        if (evaluator->card_order[i] & 15l) {
+        if (evaluator->card_order[i] & 7l) {
             range[i] = 0.0;
         } else {
             range[i] = 1.0;
         }
     }
-    int ns = 1;
-    State *states[ns];
-    for (int i = 0; i < ns; i++) {
-        states[i] = build_post_turn_cuda(15l, 1.0);
-    }
+
+    State** states = build_turn_cuda(7l, 1.0);
+
     DataType *result = (float *) calloc(1326, sizeof(DataType));
 
 
-    for (int i = 0; i < ns; i++) {
-        evaluate_post_turn_cuda(range, states[i], device_evaluator, 0, false, result);
-    }
+
+    evaluate_turn_cuda(range, states, device_evaluator, 0, false, result);
+
 
     float sum = 0;
     for (int i = 0; i < 1326; i++) {
@@ -779,7 +765,7 @@ int main() {
     printf("sum: %f\n", sum);
     free(range);
     free(result);
-    for (int i = 0; i < ns; i++) {
+    for (int i = 0; i < 49; i++) {
         cudaFree(states[i]);
     }
     cudaFree(device_evaluator);
