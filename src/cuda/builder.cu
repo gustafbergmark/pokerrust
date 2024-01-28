@@ -110,13 +110,23 @@ int build(State *state, short raises, State *root, State *device_root, Vector *v
     for (int i = 0; i < num_actions; i++) {
         Action action = actions[i];
         int new_raises = action == Raise ? raises + 1 : 0;
-        State *new_states = root + *state_index;
-        int num_states = get_action(state, action, new_states);
-        *state_index += num_states;
-        for (int j = 0; j < num_states; j++) {
-            State *new_state = new_states + j;
+        if (action == DealRiver) {
+            State temp[48];
+            int num_states = get_action(state, action, temp);
+            for (int j = 0; j < num_states; j++) {
+                State *new_state = root + *state_index;
+                *new_state = temp[j];
+                *state_index += 1;
+                count += build(new_state, new_raises, root, device_root, vectors, state_index, vector_index);
+                add_transition(state, new_state, vectors, vector_index, root, device_root);
+            }
+        } else {
+            State *new_state = root + *state_index;
+            get_action(state, action, new_state);
+            *state_index += 1;
             count += build(new_state, new_raises, root, device_root, vectors, state_index, vector_index);
             add_transition(state, new_state, vectors, vector_index, root, device_root);
+
         }
     }
     return count;
