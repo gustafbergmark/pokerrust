@@ -69,116 +69,59 @@ impl State {
             Small => self.bbbet,
             Big => self.sbbet,
         };
-        match action {
-            Fold => vec![State {
-                terminal: fold_winner,
-                action,
-                cards: self.cards,
-                sbbet: self.sbbet,
-                bbbet: self.bbbet,
-                next_to_act: opponent,
-                card_strategies: Strategy::new(),
-                next_states: vec![],
-                permutations: vec![],
-                gpu_pointer: None,
-            }],
-            Check => vec![State {
-                terminal: NonTerminal,
-                action,
-                cards: self.cards,
-                sbbet: self.bbbet, // Semi-ugly solution for first round
-                bbbet: self.bbbet,
-                next_to_act: opponent,
-                card_strategies: Strategy::new(),
-                next_states: vec![],
-                permutations: vec![],
-                gpu_pointer: None,
-            }],
-            Call => match self.cards.count_ones() {
-                0 => vec![State {
-                    terminal: Flop,
-                    action,
-                    cards: self.cards,
-                    sbbet: other_bet,
-                    bbbet: other_bet,
-                    next_to_act: opponent,
-                    card_strategies: Strategy::new(),
-                    next_states: vec![],
-                    permutations: vec![],
-                    gpu_pointer: None,
-                }],
-                3 => {
-                    let gpu_pointer = if cfg!(feature = "GPU") {
-                        Some(build_turn(self.cards, other_bet))
-                    } else {
-                        None
-                    };
-                    vec![State {
-                        terminal: Turn,
-                        action,
-                        cards: self.cards,
-                        sbbet: other_bet,
-                        bbbet: other_bet,
-                        next_to_act: opponent,
-                        card_strategies: Strategy::new(),
-                        next_states: vec![],
-                        permutations: vec![],
-                        gpu_pointer,
-                    }]
-                }
-                4 => {
-                    vec![State {
-                        terminal: River,
-                        action,
-                        cards: self.cards,
-                        sbbet: other_bet,
-                        bbbet: other_bet,
-                        next_to_act: Small,
-                        card_strategies: Strategy::new(),
-                        next_states: vec![],
-                        permutations: vec![],
-                        gpu_pointer: None,
-                    }]
-                }
-                5 => vec![State {
-                    terminal: Showdown,
-                    action,
-                    cards: self.cards,
-                    sbbet: other_bet,
-                    bbbet: other_bet,
-                    next_to_act: opponent,
-                    card_strategies: Strategy::new(),
-                    next_states: vec![],
-                    permutations: vec![],
-                    gpu_pointer: None,
-                }],
-                _ => panic!("Wrong numher of communal cards"),
-            },
+        let mut state = State {
+            terminal: self.terminal,
+            action,
+            cards: self.cards,
+            sbbet: self.sbbet,
+            bbbet: self.bbbet,
+            next_to_act: opponent,
+            card_strategies: Strategy::new(),
+            next_states: vec![],
+            permutations: vec![],
+            gpu_pointer: None,
+        };
 
+        match action {
+            Fold => state.terminal = fold_winner,
+            Check => {
+                state.terminal = NonTerminal;
+                state.sbbet = self.bbbet;
+            }
+            Call => {
+                state.sbbet = other_bet;
+                state.bbbet = other_bet;
+                match self.cards.count_ones() {
+                    0 => state.terminal = Flop,
+                    3 => {
+                        let gpu_pointer = if cfg!(feature = "GPU") {
+                            Some(build_turn(self.cards, other_bet))
+                        } else {
+                            None
+                        };
+                        state.terminal = Turn;
+                        state.gpu_pointer = gpu_pointer;
+                    }
+                    4 => state.terminal = River,
+                    5 => state.terminal = Showdown,
+                    _ => panic!("Wrong number of communal cards"),
+                }
+            }
             Raise => {
                 let raise_amount = if self.cards.count_ones() < 4 {
                     1.0
                 } else {
                     2.0
                 };
-                vec![State {
-                    terminal: NonTerminal,
-                    action,
-                    cards: self.cards,
-                    sbbet: match self.next_to_act {
-                        Small => self.bbbet + raise_amount,
-                        Big => self.sbbet,
-                    },
-                    bbbet: match self.next_to_act {
-                        Small => self.bbbet,
-                        Big => self.sbbet + raise_amount,
-                    },
-                    next_to_act: opponent,
-                    card_strategies: Strategy::new(),
-                    next_states: vec![],
-                    permutations: vec![],
-                    gpu_pointer: None,
-                }]
+                state.terminal = NonTerminal;
+                state.sbbet = match self.next_to_act {
+                    Small => self.bbbet + raise_amount,
+                    Big => self.sbbet,
+                };
+                state.bbbet = match self.next_to_act {
+                    Small => self.bbbet,
+                    Big => self.sbbet + raise_amount,
+                };
             }
             DealFlop => {
                 let deck = Card::generate_deck();
@@ -211,22 +154,14 @@ impl State {
                             possible_permutations.push(permutation.try_into().unwrap())
                         }
                     }
-
-                    let next_state = State {
-                        terminal: NonTerminal,
-                        action: DealFlop,
-                        cards: num_flop,
-                        sbbet: self.sbbet,
-                        bbbet: self.bbbet,
-                        next_to_act: Small,
-                        card_strategies: Strategy::new(),
-                        next_states: vec![],
-                        permutations: possible_permutations,
-                        gpu_pointer: None,
-                    };
+                    let mut next_state = state.clone();
+                    next_state.terminal = NonTerminal;
+                    next_state.cards = num_flop;
+                    next_state.next_to_act = Small;
+                    next_state.permutations = possible_permutations;
                     next_states.push(next_state);
                 }
-                next_states
+                return next_states;
             }
             DealTurn => {
                 let deck = Card::generate_deck();
@@ -236,21 +171,13 @@ impl State {
                     if num_turn & self.cards > 0 {
                         continue;
                     }
-                    let next_state = State {
-                        terminal: NonTerminal,
-                        action: DealTurn,
-                        cards: self.cards | num_turn,
-                        sbbet: self.sbbet,
-                        bbbet: self.bbbet,
-                        next_to_act: Small,
-                        card_strategies: Strategy::new(),
-                        next_states: vec![],
-                        permutations: vec![],
-                        gpu_pointer: None,
-                    };
+                    let mut next_state = state.clone();
+                    next_state.terminal = NonTerminal;
+                    next_state.cards = self.cards | num_turn;
+                    next_state.next_to_act = Small;
                     next_states.push(next_state);
                 }
-                next_states
+                return next_states;
             }
             DealRiver => {
                 let deck = Card::generate_deck();
@@ -260,25 +187,17 @@ impl State {
                     if (num_river & self.cards) > 0 {
                         continue;
                     }
-
-                    let next_state = State {
-                        terminal: NonTerminal,
-                        action: DealRiver,
-                        cards: self.cards | num_river,
-                        sbbet: self.sbbet,
-                        bbbet: self.bbbet,
-                        next_to_act: Small,
-                        card_strategies: Strategy::new(),
-                        next_states: vec![],
-                        permutations: vec![],
-                        gpu_pointer: None, //Some(gpu_ptr),
-                    };
+                    let mut next_state = state.clone();
+                    next_state.terminal = NonTerminal;
+                    next_state.cards = self.cards | num_river;
+                    next_state.next_to_act = Small;
                     next_states.push(next_state);
                 }
-                next_states
+                return next_states;
             }
             DealHole => panic!("DealHole should only be used in root of game"),
         }
+        return vec![state];
     }
 
     pub fn evaluate_state(
