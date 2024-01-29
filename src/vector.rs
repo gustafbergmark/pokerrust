@@ -1,3 +1,4 @@
+use std::iter::Sum;
 use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
 #[repr(align(256))]
@@ -155,5 +156,11 @@ impl Div<Float> for Vector {
             values[i] = self.values[i] / rhs;
         }
         Vector { values }
+    }
+}
+
+impl Sum for Vector {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Vector::default(), |a, b| a + b)
     }
 }

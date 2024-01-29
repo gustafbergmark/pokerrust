@@ -81,32 +81,3 @@ impl<T: Sized + Clone, const N: usize, const K: usize> Index<u64> for Combinatio
         &self.get(index).expect("Key not in map")
     }
 }
-//
-// impl<T: Sized + Clone, const N: usize, const K: usize> IntoIterator for CombinationMap<T, N, K> {
-//     type Item = (u64, T);
-//     type IntoIter = Iterator<Item = Self::Item>;
-//
-//     fn into_iter(self) -> Self::IntoIter {
-//         let mut key = 1 << K - 1;
-//         let mut res = Vec::new();
-//         for elem in self.values {
-//             res.push((key, elem));
-//             key = Self::next(key);
-//         }
-//         res.into_iter()
-//     }
-// }
-//
-// pub struct CombinationMapIterator<T: Sized + Clone, const N: usize, const K: usize> {
-//     map: CombinationMap<T, N, K>,
-//     index: u64,
-// }
-//
-// impl<T: Sized + Clone, const N: usize, const K: usize> Iterator
-//     for CombinationMapIterator<T, N, K>
-// {
-//     type Item = (u64,T);
-//     fn next(&mut self) -> Option<Self::Item> {
-//
-//     }
-// }

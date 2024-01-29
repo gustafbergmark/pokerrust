@@ -19,9 +19,11 @@ pub(crate) fn fixed_flop_poker() -> Game {
     );
     let start = Instant::now();
     let _states = build(&mut root, &evaluator, 0);
-    //dbg!(_states);
-    println!("Game created in {} seconds", start.elapsed().as_secs_f32());
-    //panic!("only build");
+    println!(
+        "Game created in {} seconds with {} states",
+        start.elapsed().as_secs_f32(),
+        _states
+    );
     Game::new(root, evaluator)
 }
 
@@ -37,13 +39,6 @@ fn build(state: &mut State, evaluator: &Evaluator, raises: u8) -> usize {
             state.add_action(next_state);
         }
     }
-    // if state.action == DealTurn {
-    //     let start = Instant::now();
-    //     build_post_turn(state.cards, state.sbbet);
-    //     dbg!(start.elapsed().as_micros());
-    //     panic!("Build once");
-    //     //sleep(Duration::from_millis(100));
-    // }
     count
 }
 

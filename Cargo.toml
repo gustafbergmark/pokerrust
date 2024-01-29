@@ -8,6 +8,9 @@ opt-level = 3
 lto = true
 codegen-units = 1
 
+[features]
+GPU = []
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]

@@ -7,13 +7,11 @@ use crate::evaluator::Evaluator;
 use crate::permutation_handler::permute;
 use crate::strategy::Strategy;
 use crate::vector::{Float, Vector};
-use assert_approx_eq::assert_approx_eq;
 use itertools::Itertools;
 use poker::Suit::*;
 use poker::{Card, Suit};
 use std::collections::HashSet;
 use std::iter::zip;
-use std::time::Instant;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct State {
@@ -23,7 +21,7 @@ pub(crate) struct State {
     pub sbbet: Float,
     pub bbbet: Float,
     next_to_act: Player,
-    pub card_strategies: Option<Strategy>,
+    card_strategies: Strategy,
     next_states: Vec<State>,
     permutations: Vec<[Suit; 4]>,
     gpu_pointer: Option<*const std::ffi::c_void>,
@@ -44,7 +42,7 @@ impl State {
             sbbet,
             bbbet,
             next_to_act,
-            card_strategies: Some(Strategy::new()),
+            card_strategies: Strategy::new(),
             next_states: vec![],
             permutations: vec![],
             gpu_pointer: None,
@@ -53,6 +51,9 @@ impl State {
 
     pub fn add_action(&mut self, state: State) {
         self.next_states.push(state);
+        if self.terminal == NonTerminal {
+            self.card_strategies.add_strategy();
+        }
     }
 
     pub fn get_action(&self, action: Action, evaluator: &Evaluator) -> Vec<State> {
@@ -76,7 +77,7 @@ impl State {
                 sbbet: self.sbbet,
                 bbbet: self.bbbet,
                 next_to_act: opponent,
-                card_strategies: None,
+                card_strategies: Strategy::new(),
                 next_states: vec![],
                 permutations: vec![],
                 gpu_pointer: None,
@@ -88,7 +89,7 @@ impl State {
                 sbbet: self.bbbet, // Semi-ugly solution for first round
                 bbbet: self.bbbet,
                 next_to_act: opponent,
-                card_strategies: Some(Strategy::new()),
+                card_strategies: Strategy::new(),
                 next_states: vec![],
                 permutations: vec![],
                 gpu_pointer: None,
@@ -101,13 +102,17 @@ impl State {
                     sbbet: other_bet,
                     bbbet: other_bet,
                     next_to_act: opponent,
-                    card_strategies: None,
+                    card_strategies: Strategy::new(),
                     next_states: vec![],
                     permutations: vec![],
                     gpu_pointer: None,
                 }],
                 3 => {
-                    let gpu_pointer = Some(build_turn(self.cards, other_bet));
+                    let gpu_pointer = if cfg!(feature = "GPU") {
+                        Some(build_turn(self.cards, other_bet))
+                    } else {
+                        None
+                    };
                     vec![State {
                         terminal: Turn,
                         action,
@@ -115,7 +120,7 @@ impl State {
                         sbbet: other_bet,
                         bbbet: other_bet,
                         next_to_act: opponent,
-                        card_strategies: None,
+                        card_strategies: Strategy::new(),
                         next_states: vec![],
                         permutations: vec![],
                         gpu_pointer,
@@ -129,7 +134,7 @@ impl State {
                         sbbet: other_bet,
                         bbbet: other_bet,
                         next_to_act: Small,
-                        card_strategies: None,
+                        card_strategies: Strategy::new(),
                         next_states: vec![],
                         permutations: vec![],
                         gpu_pointer: None,
@@ -142,7 +147,7 @@ impl State {
                     sbbet: other_bet,
                     bbbet: other_bet,
                     next_to_act: opponent,
-                    card_strategies: None,
+                    card_strategies: Strategy::new(),
                     next_states: vec![],
                     permutations: vec![],
                     gpu_pointer: None,
@@ -169,7 +174,7 @@ impl State {
                         Big => self.sbbet + raise_amount,
                     },
                     next_to_act: opponent,
-                    card_strategies: Some(Strategy::new()),
+                    card_strategies: Strategy::new(),
                     next_states: vec![],
                     permutations: vec![],
                     gpu_pointer: None,
@@ -214,7 +219,7 @@ impl State {
                         sbbet: self.sbbet,
                         bbbet: self.bbbet,
                         next_to_act: Small,
-                        card_strategies: Some(Strategy::new()),
+                        card_strategies: Strategy::new(),
                         next_states: vec![],
                         permutations: possible_permutations,
                         gpu_pointer: None,
@@ -238,7 +243,7 @@ impl State {
                         sbbet: self.sbbet,
                         bbbet: self.bbbet,
                         next_to_act: Small,
-                        card_strategies: Some(Strategy::new()),
+                        card_strategies: Strategy::new(),
                         next_states: vec![],
                         permutations: vec![],
                         gpu_pointer: None,
@@ -263,7 +268,7 @@ impl State {
                         sbbet: self.sbbet,
                         bbbet: self.bbbet,
                         next_to_act: Small,
-                        card_strategies: Some(Strategy::new()),
+                        card_strategies: Strategy::new(),
                         next_states: vec![],
                         permutations: vec![],
                         gpu_pointer: None, //Some(gpu_ptr),
@@ -293,17 +298,12 @@ impl State {
                 } else {
                     Vector::default()
                 };
-                let mut results = [Vector::default(); 3];
+                let mut results = vec![];
 
-                let strategy = self
-                    .card_strategies
-                    .as_ref()
-                    .unwrap()
-                    .get_strategy(self.next_states.len());
+                let strategy = self.card_strategies.get_strategy();
+                assert_eq!(self.next_states.len(), strategy.len());
 
-                for (a, (next, action_prob)) in
-                    zip(self.next_states.iter_mut(), strategy).enumerate()
-                {
+                for (next, action_prob) in zip(self.next_states.iter_mut(), strategy) {
                     let utility = if self.next_to_act == updating_player {
                         next.evaluate_state(
                             opponent_range,
@@ -324,7 +324,7 @@ impl State {
 
                     if updating_player == self.next_to_act {
                         if !calc_exploit {
-                            results[a] = utility;
+                            results.push(utility);
                             average_strategy += utility * action_prob;
                         } else {
                             for i in 0..1326 {
@@ -337,13 +337,11 @@ impl State {
                 }
                 // update strategy
                 if self.next_to_act == updating_player && !calc_exploit {
-                    let mut update = [Vector::default(); 3];
-                    for (i, &util) in results.iter().enumerate() {
-                        if i < self.next_states.len() {
-                            update[i] = util - average_strategy;
-                        }
+                    let mut update = vec![];
+                    for util in results {
+                        update.push(util - average_strategy);
                     }
-                    self.card_strategies.as_mut().unwrap().update_add(&update);
+                    self.card_strategies.update_add(&update);
                 }
 
                 average_strategy
@@ -386,53 +384,48 @@ impl State {
                 total * (1.0 / count)
             }
             Turn => {
-                let _start = Instant::now();
-                let gpu = evaluate_turn_gpu(
-                    self.gpu_pointer.expect("GPU pointer missing"),
-                    gpu_eval_ptr.expect("GPU eval missing"),
-                    opponent_range,
-                    updating_player,
-                    calc_exploit,
-                );
-                //println!("COMPLETE {} micros", _start.elapsed().as_micros());
-                return gpu;
-                // let mut total = Vector::default();
-                // for next_state in self.next_states.iter_mut() {
-                //     let mut new_range = *opponent_range;
-                //     // It is impossible to have hands which contains flop cards
-                //     for i in 0..1326 {
-                //         if (evaluator.card_order()[i] & next_state.cards) > 0 {
-                //             new_range[i] = 0.0;
-                //         }
-                //     }
-                //     let mut res = next_state.evaluate_state(
-                //         &new_range,
-                //         evaluator,
-                //         updating_player,
-                //         calc_exploit,
-                //         gpu_eval_ptr,
-                //     );
-                //     // For safety for the future
-                //     for i in 0..1326 {
-                //         if (evaluator.card_order()[i] & next_state.cards) > 0 {
-                //             res[i] = 0.0;
-                //         }
-                //     }
-                //     total += res;
-                // }
-                // total *= 1.0 / (self.next_states.len() as Float);
-                //
-                // for i in 0..1326 {
-                //     assert_approx_eq!(total[i], gpu[i], 1e-4);
-                // }
-                // total
+                if cfg!(feature = "GPU") {
+                    let gpu = evaluate_turn_gpu(
+                        self.gpu_pointer.expect("GPU pointer missing"),
+                        gpu_eval_ptr.expect("GPU eval missing"),
+                        opponent_range,
+                        updating_player,
+                        calc_exploit,
+                    );
+                    gpu
+                } else {
+                    let mut total = Vector::default();
+                    for next_state in self.next_states.iter_mut() {
+                        let mut new_range = *opponent_range;
+                        // It is impossible to have hands which contains flop cards
+                        for i in 0..1326 {
+                            if (evaluator.card_order()[i] & next_state.cards) > 0 {
+                                new_range[i] = 0.0;
+                            }
+                        }
+                        let mut res = next_state.evaluate_state(
+                            &new_range,
+                            evaluator,
+                            updating_player,
+                            calc_exploit,
+                            gpu_eval_ptr,
+                        );
+                        // For safety for the future
+                        for i in 0..1326 {
+                            if (evaluator.card_order()[i] & next_state.cards) > 0 {
+                                res[i] = 0.0;
+                            }
+                        }
+                        total += res;
+                    }
+                    total *= 1.0 / (self.next_states.len() as Float);
+                    total
+                }
             }
             River => {
-                // Some parallelization
                 let mut total = Vector::default();
                 let res = self
                     .next_states
-                    //.par_iter_mut()
                     .iter_mut()
                     .map(|next_state| {
                         next_state.evaluate_state(
