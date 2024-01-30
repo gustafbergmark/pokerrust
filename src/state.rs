@@ -413,9 +413,6 @@ impl State {
         let mut range_sum = 0.0;
         let mut collisions = [0.0; 52];
         for (index, &cards) in card_order.iter().enumerate() {
-            if cards & self.cards > 0 {
-                continue;
-            }
             range_sum += opponent_range[index];
             let card = Evaluator::separate_cards(cards);
             for c in card {
@@ -423,9 +420,6 @@ impl State {
             }
         }
         for index in 0..1326 {
-            if card_order[index] & self.cards > 0 {
-                continue;
-            }
             result[index] = range_sum + opponent_range[index];
             let cards = Evaluator::separate_cards(card_order[index]);
             for card in cards {
@@ -482,9 +476,6 @@ impl State {
             for &index in group {
                 let index = index as usize;
                 let cards = card_order[index];
-                if cards & self.cards > 0 {
-                    continue;
-                }
                 let card = Evaluator::separate_cards(cards);
                 result[index] += cumulative;
                 current_cumulative += opponent_range[index];
@@ -510,9 +501,6 @@ impl State {
             for &index in group {
                 let index = index as usize;
                 let cards = card_order[index];
-                if cards & self.cards > 0 {
-                    continue;
-                }
                 let card = Evaluator::separate_cards(cards);
                 result[index] -= cumulative;
                 current_cumulative += opponent_range[index];
