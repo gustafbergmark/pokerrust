@@ -10,9 +10,15 @@ use crate::vector::{Float, Vector};
 use itertools::Itertools;
 use poker::Suit::*;
 use poker::{Card, Suit};
+use rayon::iter::IntoParallelRefMutIterator;
+use rayon::iter::ParallelIterator;
 use std::collections::HashSet;
+use std::ffi::c_void;
 use std::iter::zip;
-
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Pointer(pub(crate) *const c_void);
+unsafe impl Send for Pointer {}
+unsafe impl Sync for Pointer {}
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct State {
     pub terminal: TerminalState,
@@ -24,7 +30,7 @@ pub(crate) struct State {
     card_strategies: Strategy,
     next_states: Vec<State>,
     permutations: Vec<[Suit; 4]>,
-    gpu_pointer: Option<*const std::ffi::c_void>,
+    gpu_pointer: Option<Pointer>,
 }
 
 impl State {
@@ -95,7 +101,7 @@ impl State {
                     0 => state.terminal = Flop,
                     3 => {
                         let gpu_pointer = if cfg!(feature = "GPU") {
-                            Some(build_turn(self.cards, other_bet))
+                            Some(Pointer(build_turn(self.cards, other_bet)))
                         } else {
                             None
                         };
@@ -207,7 +213,7 @@ impl State {
         evaluator: &Evaluator,
         updating_player: Player,
         calc_exploit: bool,
-        gpu_eval_ptr: Option<*const std::ffi::c_void>,
+        gpu_eval_ptr: Option<Pointer>,
     ) -> Vector {
         //(util of sb, util of bb, exploitability of updating player)
         let opponent_range = match updating_player {
@@ -280,7 +286,7 @@ impl State {
                 let mut total = Vector::default();
                 let mut count = 0.0;
                 for next_state in self.next_states.iter_mut() {
-                    let eval_ptr = transfer_flop_eval(evaluator, next_state.cards);
+                    let eval_ptr = Pointer(transfer_flop_eval(evaluator, next_state.cards));
                     let mut new_sb_range = *sb_range;
                     let mut new_bb_range = *bb_range;
                     // It is impossible to have hands which contains flop cards
@@ -358,7 +364,7 @@ impl State {
                 let mut total = Vector::default();
                 let res = self
                     .next_states
-                    .iter_mut()
+                    .par_iter_mut()
                     .map(|next_state| {
                         let mut new_sb_range = *sb_range;
                         let mut new_bb_range = *bb_range;

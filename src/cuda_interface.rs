@@ -1,6 +1,7 @@
 use crate::combination_map::CombinationMap;
 use crate::enums::Player;
 use crate::evaluator::Evaluator;
+use crate::state::Pointer;
 use crate::vector::{Float, Vector};
 
 extern "C" {
@@ -74,15 +75,15 @@ pub fn transfer_flop_eval(eval: &Evaluator, communal_cards: u64) -> *const std::
     return res;
 }
 
-pub fn free_eval(ptr: *const std::ffi::c_void) {
+pub fn free_eval(ptr: Pointer) {
     unsafe {
-        free_eval_cuda(ptr);
+        free_eval_cuda(ptr.0);
     }
 }
 
 pub fn evaluate_turn_gpu(
-    states: *const std::ffi::c_void,
-    evaluator: *const std::ffi::c_void,
+    states: Pointer,
+    evaluator: Pointer,
     opponent_range: &Vector,
     updating_player: Player,
     calc_exploit: bool,
@@ -95,8 +96,8 @@ pub fn evaluate_turn_gpu(
     unsafe {
         evaluate_turn_cuda(
             opponent_range.values.as_ptr(),
-            states,
-            evaluator,
+            states.0,
+            evaluator.0,
             updating_player,
             calc_exploit,
             result.values.as_mut_ptr(),
