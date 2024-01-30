@@ -29,21 +29,41 @@ impl Game {
 
     pub fn perform_iter(&mut self, iter: usize) {
         let start = Instant::now();
-        let _ = self
-            .root
-            .evaluate_state(&Vector::ones(), &self.evaluator, Small, false, None);
+        let _ = self.root.evaluate_state(
+            &Vector::ones(),
+            &Vector::ones(),
+            &self.evaluator,
+            Small,
+            false,
+            None,
+        );
 
-        let _ = self
-            .root
-            .evaluate_state(&Vector::ones(), &self.evaluator, Big, false, None);
+        let _ = self.root.evaluate_state(
+            &Vector::ones(),
+            &Vector::ones(),
+            &self.evaluator,
+            Big,
+            false,
+            None,
+        );
         let iter_time = start.elapsed().as_secs_f32();
         if iter % 10 == 0 {
-            let exp_sb =
-                self.root
-                    .evaluate_state(&Vector::ones(), &self.evaluator, Small, true, None);
-            let exp_bb =
-                self.root
-                    .evaluate_state(&Vector::ones(), &self.evaluator, Big, true, None);
+            let exp_sb = self.root.evaluate_state(
+                &Vector::ones(),
+                &Vector::ones(),
+                &self.evaluator,
+                Small,
+                true,
+                None,
+            );
+            let exp_bb = self.root.evaluate_state(
+                &Vector::ones(),
+                &Vector::ones(),
+                &self.evaluator,
+                Big,
+                true,
+                None,
+            );
             println!(
                 "Iteration {} done \n\
                   Exploitability: {} mb/h \n\

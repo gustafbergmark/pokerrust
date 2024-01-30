@@ -202,13 +202,18 @@ impl State {
 
     pub fn evaluate_state(
         &mut self,
-        opponent_range: &Vector,
+        sb_range: &Vector,
+        bb_range: &Vector,
         evaluator: &Evaluator,
         updating_player: Player,
         calc_exploit: bool,
         gpu_eval_ptr: Option<*const std::ffi::c_void>,
     ) -> Vector {
         //(util of sb, util of bb, exploitability of updating player)
+        let opponent_range = match updating_player {
+            Small => bb_range,
+            Big => sb_range,
+        };
         match self.terminal {
             NonTerminal => {
                 // Observe: This vector is also used when calculating the exploitability
@@ -223,22 +228,24 @@ impl State {
                 assert_eq!(self.next_states.len(), strategy.len());
 
                 for (next, action_prob) in zip(self.next_states.iter_mut(), strategy) {
-                    let utility = if self.next_to_act == updating_player {
-                        next.evaluate_state(
-                            opponent_range,
+                    let utility = match self.next_to_act {
+                        Small => next.evaluate_state(
+                            &(*sb_range * action_prob),
+                            bb_range,
                             evaluator,
                             updating_player,
                             calc_exploit,
                             gpu_eval_ptr,
-                        )
-                    } else {
-                        next.evaluate_state(
-                            &(*opponent_range * action_prob),
+                        ),
+
+                        Big => next.evaluate_state(
+                            sb_range,
+                            &(*bb_range * action_prob),
                             evaluator,
                             updating_player,
                             calc_exploit,
                             gpu_eval_ptr,
-                        )
+                        ),
                     };
 
                     if updating_player == self.next_to_act {
@@ -274,15 +281,18 @@ impl State {
                 let mut count = 0.0;
                 for next_state in self.next_states.iter_mut() {
                     let eval_ptr = transfer_flop_eval(evaluator, next_state.cards);
-                    let mut new_range = *opponent_range;
+                    let mut new_sb_range = *sb_range;
+                    let mut new_bb_range = *bb_range;
                     // It is impossible to have hands which contains flop cards
                     for i in 0..1326 {
                         if (evaluator.card_order()[i] & next_state.cards) > 0 {
-                            new_range[i] = 0.0;
+                            new_sb_range[i] = 0.0;
+                            new_bb_range[i] = 0.0;
                         }
                     }
                     let mut res = next_state.evaluate_state(
-                        &new_range,
+                        &new_sb_range,
+                        &new_bb_range,
                         evaluator,
                         updating_player,
                         calc_exploit,
@@ -315,15 +325,18 @@ impl State {
                 } else {
                     let mut total = Vector::default();
                     for next_state in self.next_states.iter_mut() {
-                        let mut new_range = *opponent_range;
+                        let mut new_sb_range = *sb_range;
+                        let mut new_bb_range = *bb_range;
                         // It is impossible to have hands which contains flop cards
                         for i in 0..1326 {
                             if (evaluator.card_order()[i] & next_state.cards) > 0 {
-                                new_range[i] = 0.0;
+                                new_sb_range[i] = 0.0;
+                                new_bb_range[i] = 0.0;
                             }
                         }
                         let mut res = next_state.evaluate_state(
-                            &new_range,
+                            &new_sb_range,
+                            &new_bb_range,
                             evaluator,
                             updating_player,
                             calc_exploit,
@@ -347,13 +360,29 @@ impl State {
                     .next_states
                     .iter_mut()
                     .map(|next_state| {
-                        next_state.evaluate_state(
-                            opponent_range,
+                        let mut new_sb_range = *sb_range;
+                        let mut new_bb_range = *bb_range;
+                        // It is impossible to have hands which contains flop cards
+                        for i in 0..1326 {
+                            if (evaluator.card_order()[i] & next_state.cards) > 0 {
+                                new_sb_range[i] = 0.0;
+                                new_bb_range[i] = 0.0;
+                            }
+                        }
+                        let mut res = next_state.evaluate_state(
+                            &new_sb_range,
+                            &new_bb_range,
                             evaluator,
                             updating_player,
                             calc_exploit,
                             gpu_eval_ptr,
-                        )
+                        );
+                        for i in 0..1326 {
+                            if (evaluator.card_order()[i] & next_state.cards) > 0 {
+                                res[i] = 0.0;
+                            }
+                        }
+                        res
                     })
                     .collect::<Vec<_>>();
                 for val in res {
