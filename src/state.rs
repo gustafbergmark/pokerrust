@@ -5,7 +5,7 @@ use crate::enums::TerminalState::*;
 use crate::enums::*;
 use crate::evaluator::Evaluator;
 use crate::permutation_handler::permute;
-use crate::strategy::Strategy;
+use crate::strategy::{AbstractStrategy, RegularStrategy, Strategy};
 use crate::vector::{Float, Vector};
 use itertools::Itertools;
 use poker::Suit::*;
@@ -27,7 +27,7 @@ pub(crate) struct State {
     pub sbbet: Float,
     pub bbbet: Float,
     next_to_act: Player,
-    card_strategies: Strategy,
+    card_strategies: Strategy<256>,
     next_states: Vec<State>,
     permutations: Vec<[Suit; 4]>,
     gpu_pointer: Option<Pointer>,
@@ -48,7 +48,7 @@ impl State {
             sbbet,
             bbbet,
             next_to_act,
-            card_strategies: Strategy::new(),
+            card_strategies: Strategy::Regular(RegularStrategy::new()),
             next_states: vec![],
             permutations: vec![],
             gpu_pointer: None,
@@ -75,6 +75,11 @@ impl State {
             Small => self.bbbet,
             Big => self.sbbet,
         };
+        let strategy = if self.cards.count_ones() <= 5 {
+            Strategy::Regular(RegularStrategy::new())
+        } else {
+            Strategy::Abstract(AbstractStrategy::new())
+        };
         let mut state = State {
             terminal: self.terminal,
             action,
@@ -82,7 +87,7 @@ impl State {
             sbbet: self.sbbet,
             bbbet: self.bbbet,
             next_to_act: opponent,
-            card_strategies: Strategy::new(),
+            card_strategies: strategy,
             next_states: vec![],
             permutations: vec![],
             gpu_pointer: None,
@@ -230,7 +235,9 @@ impl State {
                 };
                 let mut results = vec![];
 
-                let strategy = self.card_strategies.get_strategy();
+                let strategy =
+                    self.card_strategies
+                        .get_strategy(opponent_range, evaluator, self.cards);
                 assert_eq!(self.next_states.len(), strategy.len());
 
                 for (next, action_prob) in zip(self.next_states.iter_mut(), strategy) {
@@ -273,7 +280,8 @@ impl State {
                     for util in results {
                         update.push(util - average_strategy);
                     }
-                    self.card_strategies.update_add(&update);
+                    self.card_strategies
+                        .update_add(&update, opponent_range, evaluator, self.cards);
                 }
 
                 average_strategy
@@ -365,6 +373,7 @@ impl State {
                 let res = self
                     .next_states
                     .par_iter_mut()
+                    //.iter_mut()
                     .map(|next_state| {
                         let mut new_sb_range = *sb_range;
                         let mut new_bb_range = *bb_range;
