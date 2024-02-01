@@ -9,7 +9,7 @@ use std::time::Instant;
 
 // A variant where the flop is fixed, and no raising the first two rounds of betting.
 // Should be about 1 GB in size
-pub(crate) fn fixed_flop_poker() -> Game {
+pub(crate) fn fixed_flop_poker<const M: usize>() -> Game<M> {
     let mut root = State::new(NonTerminal, DealHole, 0.5, 1.0, Small);
     let start = Instant::now();
     let evaluator = Evaluator::new();
@@ -27,7 +27,7 @@ pub(crate) fn fixed_flop_poker() -> Game {
     Game::new(root, evaluator)
 }
 
-fn build(state: &mut State, evaluator: &Evaluator, raises: u8) -> usize {
+fn build<const M: usize>(state: &mut State<M>, evaluator: &Evaluator<M>, raises: u8) -> usize {
     let mut count = 1;
     for action in possible_actions(state, raises) {
         let new_raises = match action {
@@ -42,7 +42,7 @@ fn build(state: &mut State, evaluator: &Evaluator, raises: u8) -> usize {
     count
 }
 
-fn possible_actions(state: &State, raises: u8) -> Vec<Action> {
+fn possible_actions<const M: usize>(state: &State<M>, raises: u8) -> Vec<Action> {
     match state.action {
         Fold => vec![],
         Check => {

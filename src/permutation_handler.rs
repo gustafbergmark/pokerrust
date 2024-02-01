@@ -4,7 +4,11 @@ use crate::vector::Vector;
 use poker::Suit::*;
 use poker::{Card, Suit};
 
-pub fn permute(permutation: [Suit; 4], v: Vector, evaluator: &Evaluator) -> Vector {
+pub fn permute<const M: usize>(
+    permutation: [Suit; 4],
+    v: Vector,
+    evaluator: &Evaluator<M>,
+) -> Vector {
     let mut result = Vector::default();
     let card_order: Vec<[Card; 2]> = evaluator
         .card_order()

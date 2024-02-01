@@ -3,7 +3,7 @@ use crate::enums::Action::*;
 use crate::enums::Player::*;
 use crate::enums::TerminalState::*;
 use crate::enums::*;
-use crate::evaluator::Evaluator;
+use crate::evaluator::{separate_cards, Evaluator};
 use crate::permutation_handler::permute;
 use crate::strategy::{AbstractStrategy, RegularStrategy, Strategy};
 use crate::vector::{Float, Vector};
@@ -20,20 +20,20 @@ pub struct Pointer(pub(crate) *const c_void);
 unsafe impl Send for Pointer {}
 unsafe impl Sync for Pointer {}
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct State {
+pub(crate) struct State<const M: usize> {
     pub terminal: TerminalState,
     pub action: Action,
     pub cards: u64,
     pub sbbet: Float,
     pub bbbet: Float,
     next_to_act: Player,
-    card_strategies: Strategy<256>,
-    next_states: Vec<State>,
+    card_strategies: Strategy<M>,
+    next_states: Vec<State<M>>,
     permutations: Vec<[Suit; 4]>,
     gpu_pointer: Option<Pointer>,
 }
 
-impl State {
+impl<const M: usize> State<M> {
     pub fn new(
         terminal: TerminalState,
         action: Action,
@@ -55,14 +55,14 @@ impl State {
         }
     }
 
-    pub fn add_action(&mut self, state: State) {
+    pub fn add_action(&mut self, state: State<M>) {
         self.next_states.push(state);
         if self.terminal == NonTerminal {
             self.card_strategies.add_strategy();
         }
     }
 
-    pub fn get_action(&self, action: Action, evaluator: &Evaluator) -> Vec<State> {
+    pub fn get_action(&self, action: Action, evaluator: &Evaluator<M>) -> Vec<State<M>> {
         let opponent = match self.next_to_act {
             Small => Big,
             Big => Small,
@@ -75,7 +75,7 @@ impl State {
             Small => self.bbbet,
             Big => self.sbbet,
         };
-        let strategy = if self.cards.count_ones() <= 5 {
+        let strategy = if self.cards.count_ones() < 5 {
             Strategy::Regular(RegularStrategy::new())
         } else {
             Strategy::Abstract(AbstractStrategy::new())
@@ -215,7 +215,7 @@ impl State {
         &mut self,
         sb_range: &Vector,
         bb_range: &Vector,
-        evaluator: &Evaluator,
+        evaluator: &Evaluator<M>,
         updating_player: Player,
         calc_exploit: bool,
         gpu_eval_ptr: Option<Pointer>,
@@ -235,9 +235,7 @@ impl State {
                 };
                 let mut results = vec![];
 
-                let strategy =
-                    self.card_strategies
-                        .get_strategy(opponent_range, evaluator, self.cards);
+                let strategy = self.card_strategies.get_strategy(evaluator, self.cards);
                 assert_eq!(self.next_states.len(), strategy.len());
 
                 for (next, action_prob) in zip(self.next_states.iter_mut(), strategy) {
@@ -281,7 +279,7 @@ impl State {
                         update.push(util - average_strategy);
                     }
                     self.card_strategies
-                        .update_add(&update, opponent_range, evaluator, self.cards);
+                        .update_add(&update, evaluator, self.cards);
                 }
 
                 average_strategy
@@ -413,7 +411,7 @@ impl State {
     fn evaluate_fold(
         &self,
         opponent_range: &Vector,
-        evaluator: &Evaluator,
+        evaluator: &Evaluator<M>,
         updating_player: Player,
         folding_player: Player,
     ) -> Vector {
@@ -423,14 +421,14 @@ impl State {
         let mut collisions = [0.0; 52];
         for (index, &cards) in card_order.iter().enumerate() {
             range_sum += opponent_range[index];
-            let card = Evaluator::separate_cards(cards);
+            let card = separate_cards(cards);
             for c in card {
                 collisions[c] += opponent_range[index];
             }
         }
         for index in 0..1326 {
             result[index] = range_sum + opponent_range[index];
-            let cards = Evaluator::separate_cards(card_order[index]);
+            let cards = separate_cards(card_order[index]);
             for card in cards {
                 result[index] -= collisions[card];
             }
@@ -451,7 +449,7 @@ impl State {
     fn evaluate_showdown(
         &self,
         opponent_range: &Vector,
-        evaluator: &Evaluator,
+        evaluator: &Evaluator<M>,
         updating_player: Player,
     ) -> Vector {
         let mut result = Vector::default();
@@ -485,7 +483,7 @@ impl State {
             for &index in group {
                 let index = index as usize;
                 let cards = card_order[index];
-                let card = Evaluator::separate_cards(cards);
+                let card = separate_cards(cards);
                 result[index] += cumulative;
                 current_cumulative += opponent_range[index];
                 for c in card {
@@ -510,7 +508,7 @@ impl State {
             for &index in group {
                 let index = index as usize;
                 let cards = card_order[index];
-                let card = Evaluator::separate_cards(cards);
+                let card = separate_cards(cards);
                 result[index] -= cumulative;
                 current_cumulative += opponent_range[index];
                 for c in card {

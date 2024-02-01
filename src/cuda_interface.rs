@@ -30,7 +30,10 @@ extern "C" {
 pub fn build_turn(cards: u64, bet: Float) -> *const std::ffi::c_void {
     unsafe { build_turn_cuda(cards, bet) }
 }
-pub fn transfer_flop_eval(eval: &Evaluator, communal_cards: u64) -> *const std::ffi::c_void {
+pub fn transfer_flop_eval<const M: usize>(
+    eval: &Evaluator<M>,
+    communal_cards: u64,
+) -> *const std::ffi::c_void {
     assert_eq!(communal_cards.count_ones(), 3);
     let mut evals = vec![];
     let mut collisions = vec![];
