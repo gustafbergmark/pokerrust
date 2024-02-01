@@ -12,7 +12,7 @@ pub struct Evaluator<const M: usize> {
     card_indexes: Vec<u16>,
     vectorized_eval: CombinationMap<Vec<u16>, 52, 5>,
     collisions: CombinationMap<Vec<u16>, 52, 5>,
-    abstractions: CombinationMap<Vec<u32>, 52, 5>,
+    abstractions: CombinationMap<Vec<u16>, 52, 5>,
     //gpu_eval: CombinationMap<CombinationMap<(&'a Vec<u16>, &'a Vec<u16>), 52, 2>, 52, 3>,
     card_nums: HashMap<Card, u64>,
     num_cards: HashMap<u64, Card>,
@@ -137,7 +137,7 @@ impl<const M: usize> Evaluator<M> {
 
                     let mut order_map: CombinationMap<Vec<u16>, 52, 5> = CombinationMap::new();
                     let mut collision_map: CombinationMap<Vec<u16>, 52, 5> = CombinationMap::new();
-                    let mut abstraction_map: CombinationMap<Vec<u32>, 52, 5> =
+                    let mut abstraction_map: CombinationMap<Vec<u16>, 52, 5> =
                         CombinationMap::new();
                     for (key, order, collisions, abstraction) in result {
                         order_map.insert(key, order);
@@ -194,7 +194,7 @@ impl<const M: usize> Evaluator<M> {
         self.vectorized_eval.get(communal_cards).unwrap()
     }
 
-    pub fn abstractions(&self, communal_cards: u64) -> &Vec<u32> {
+    pub fn abstractions(&self, communal_cards: u64) -> &Vec<u16> {
         self.abstractions.get(communal_cards).unwrap()
     }
 
@@ -245,7 +245,7 @@ fn phs(
     evaluation: &Vec<u16>,
     card_order: &Vec<u64>,
     communal_cards: u64,
-) -> Vec<u32> {
+) -> Vec<u16> {
     let sorted = evaluation;
     let mut groups = vec![];
     let mut current = vec![sorted[0] & 2047];
@@ -262,7 +262,7 @@ fn phs(
     let mut collisions = [0; 52];
 
     let mut cumulative = 0;
-    let mut res: Vec<u32> = vec![0; 1326];
+    let mut result: Vec<u32> = vec![0; 1326];
     // Doubled integers to not have to divide by 2 in current_collisions
     for group in groups.iter() {
         let mut current_cumulative = 0;
@@ -274,10 +274,10 @@ fn phs(
                 continue;
             }
             let card = separate_cards(cards);
-            res[index] += cumulative;
+            result[index] += cumulative;
             current_cumulative += 2;
             for c in card {
-                res[index] -= collisions[c];
+                result[index] -= collisions[c];
                 current_collisions[c] += 2;
             }
         }
@@ -289,9 +289,9 @@ fn phs(
             }
             let card = separate_cards(cards);
             // +1 because inclusion exclusion
-            res[index] += current_cumulative + 1;
+            result[index] += current_cumulative + 1;
             for c in card {
-                res[index] -= current_collisions[c];
+                result[index] -= current_collisions[c];
             }
         }
         cumulative += current_cumulative;
@@ -300,8 +300,9 @@ fn phs(
         }
     }
     // 5 communal cards, 2 on own hand leads to 45 choose 2 opponent hands
-    for elem in res.iter_mut() {
-        *elem = (*elem * abstractions as u32) / (990 * 2);
+    let mut res = vec![];
+    for elem in result {
+        res.push(((elem * abstractions as u32) / (990 * 2)) as u16);
     }
     res
 }

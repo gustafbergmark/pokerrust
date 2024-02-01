@@ -18,7 +18,8 @@ pub(crate) fn fixed_flop_poker<const M: usize>() -> Game<M> {
         start.elapsed().as_secs_f32()
     );
     let start = Instant::now();
-    let _states = build(&mut root, &evaluator, 0);
+    // Raises = 1 since original bb counts as raise
+    let _states = build(&mut root, &evaluator, 1);
     println!(
         "Game created in {} seconds with {} states",
         start.elapsed().as_secs_f32(),

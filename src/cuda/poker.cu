@@ -8,6 +8,7 @@
 
 #define TPB 128
 #define ITERS 11
+#define ABSTRACTIONS 256
 
 
 __device__ void multiply(Vector *__restrict__ v1, Vector *__restrict__ v2, Vector *__restrict__ res) {
@@ -174,6 +175,36 @@ __device__ void get_strategy(State *state, Vector *scratch, Vector *result) {
     }
 }
 
+__device__ void
+get_strategy_abstract(State *state, Vector *scratch, Vector *result, long communal_cards, Evaluator *evaluator) {
+    int tid = threadIdx.x;
+    long turn_river = communal_cards ^ evaluator->flop;
+    long eval_index = get_index(turn_river);
+    short *abstractions = evaluator->abstractions + eval_index * 1326;
+    Vector *sum = scratch;
+    zero(sum);
+    int transitions = state->transitions;
+    for (int k = 0; k < transitions; k++) {
+        add_assign(sum, state->card_strategies[k]);
+    }
+    __syncthreads();
+    for (int b = 0; b < ITERS; b++) {
+        int index = tid + TPB * b;
+        if (index < 1326) {
+            short abstract_index = abstractions[index];
+            for (int k = 0; k < transitions; k++) {
+                if (sum->values[abstract_index] <= 1e-4) {
+                    result[k].values[index] = 1.0 / ((DataType) transitions);
+                } else {
+                    result[k].values[index] =
+                            state->card_strategies[k]->values[abstract_index] / sum->values[abstract_index];
+                }
+            }
+        }
+    }
+    __syncthreads();
+}
+
 __device__ void update_strategy(State *__restrict__ state, Vector *__restrict__ update) {
     int tid = threadIdx.x;
     for (int i = 0; i < state->transitions; i++) {
@@ -185,6 +216,34 @@ __device__ void update_strategy(State *__restrict__ state, Vector *__restrict__ 
             }
         }
     }
+}
+
+__device__ void update_strategy_abstract(State *__restrict__ state, Vector *__restrict__ update, long communal_cards,
+                                         Evaluator *evaluator) {
+    int tid = threadIdx.x;
+    long turn_river = communal_cards ^ evaluator->flop;
+    long eval_index = get_index(turn_river);
+    short *abstractions = evaluator->abstractions + eval_index * 1326;
+    __syncthreads();
+    for (int b = 0; b < ITERS; b++) {
+        int index = tid + TPB * b;
+        if (index < 1326) {
+            short abstract_index = abstractions[index];
+            for (int k = 0; k < state->transitions; k++) {
+                atomicAdd(&state->card_strategies[k]->values[abstract_index], update[k].values[index]);
+            }
+        }
+    }
+    __syncthreads();
+    for (int k = 0; k < state->transitions; k++) {
+        for (int b = 0; b < ((ABSTRACTIONS + TPB - 1) / TPB); b++) {
+            int index = tid + TPB * b;
+            if (index < ABSTRACTIONS) {
+                state->card_strategies[k]->values[index] = max(state->card_strategies[k]->values[index], 0.0);
+            }
+        }
+    }
+    __syncthreads();
 }
 
 __device__ void
@@ -362,7 +421,8 @@ __device__ void remove_collisions(Vector *vector, long cards) {
     __syncthreads();
 }
 
-__device__ void handle_node(Vector *scratch, Context *contexts, short updating_player, bool calc_exploit, int *depth) {
+__device__ void handle_node(Vector *scratch, Context *contexts, short updating_player, bool calc_exploit, int *depth,
+                            long communal_cards, Evaluator *evaluator) {
     int tid = threadIdx.x;
     Context *context = &contexts[*depth];
     State *state = context->state;
@@ -385,7 +445,11 @@ __device__ void handle_node(Vector *scratch, Context *contexts, short updating_p
         } else {
             zero(average_strategy);
         }
-        get_strategy(state, scratch, action_probs);
+        if (__popcll(communal_cards) < 5) {
+            get_strategy(state, scratch, action_probs);
+        } else {
+            get_strategy_abstract(state, scratch, action_probs, communal_cards, evaluator);
+        }
     } else {
         int i = context->transition - 1;
         Vector *new_result = average_strategy + 10;
@@ -413,7 +477,11 @@ __device__ void handle_node(Vector *scratch, Context *contexts, short updating_p
                 Vector *util = results + i;
                 sub_assign(util, average_strategy);
             }
-            update_strategy(state, results);
+            if (__popcll(communal_cards) < 5) {
+                update_strategy(state, results);
+            } else {
+                update_strategy_abstract(state, results, communal_cards, evaluator);
+            }
         }
         (*depth)--;
     } else {
@@ -435,6 +503,8 @@ __device__ void handle_node(Vector *scratch, Context *contexts, short updating_p
 
 __device__ void evaluate_river(Vector *opponent_range_root,
                                State *root_state,
+                               Evaluator *evaluator,
+                               long communal_cards,
                                short *card_indexes,
                                short *eval,
                                short *coll_vec,
@@ -471,7 +541,7 @@ __device__ void evaluate_river(Vector *opponent_range_root,
                 depth--;
                 break;
             case NonTerminal : {
-                handle_node(scratch, contexts, updating_player, calc_exploit, &depth);
+                handle_node(scratch, contexts, updating_player, calc_exploit, &depth, communal_cards, evaluator);
                 break;
             }
         }
@@ -496,7 +566,6 @@ __global__ void evaluate_turn(Vector *opponent_range_root,
         Context *context = &contexts[depth];
         State *state = context->state;
         Vector *opponent_range = context->opponent_range;
-        int transitions = state->transitions;
 
         switch (state->terminal) {
             case SBWins :
@@ -512,29 +581,31 @@ __global__ void evaluate_turn(Vector *opponent_range_root,
                 depth--;
                 break;
             case NonTerminal : {
-                handle_node(scratch, contexts, updating_player, calc_exploit, &depth);
+                handle_node(scratch, contexts, updating_player, calc_exploit, &depth, state->cards, evaluator);
                 break;
             }
             case River:
                 Vector *result = scratch;
                 scratch += 1;
                 zero(result);
-                for (int i = 0; i < state->transitions; i++) {
-                    State *next = state->next_states[i];
+                State *next = state->next_states[0];
+                for (int c = 0; c < 52; c++) {
+                    long river = 1l << c;
+                    if (river & state->cards) continue;
                     Vector *new_range = scratch;
                     copy(opponent_range, new_range);
-                    remove_collisions(new_range, next->cards ^ state->cards);
-                    long set = next->cards ^ evaluator->flop;
+                    remove_collisions(new_range, river);
+                    long set = (state->cards | river) ^ evaluator->flop;
                     int eval_index = get_index(set);
                     short *eval = evaluator->eval + eval_index * (1326 + 128 * 2);
                     short *coll_vec = evaluator->coll_vec + eval_index * 52 * 51;
-                    evaluate_river(new_range, next, evaluator->card_indexes, eval, coll_vec, updating_player,
-                                   calc_exploit,
-                                   scratch_root + (depth + 1) * 10, temp);
-                    remove_collisions(result + 10, next->cards ^ state->cards);
+                    evaluate_river(new_range, next, evaluator, state->cards | river, evaluator->card_indexes, eval, coll_vec,
+                                   updating_player,
+                                   calc_exploit, scratch_root + (depth + 1) * 10, temp);
+                    remove_collisions(result + 10, river);
                     add_assign(result, result + 10);
                 }
-                divide(result, (DataType) transitions);
+                divide(result, (DataType) 48);
                 depth--;
                 break;
         }

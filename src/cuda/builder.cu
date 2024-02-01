@@ -80,9 +80,9 @@ int get_action(State *state, Action action, State *new_states) {
                 new_states->transitions = 0;
                 new_states->cards |= card;
                 new_states->terminal = NonTerminal;
-                new_states += 1;
+                break;
             }
-            return 48;
+            return 1;
         case DealTurn :
             // will not happen
             return 0;
@@ -133,8 +133,8 @@ int build(State *state, short raises, State *root, State *device_root, Vector *v
 }
 
 void
-build_post_turn_kernel(long cards, DataType bet, State *root, State *device_root, Vector *vectors, int *state_index,
-                       int *vector_index) {
+build_post_turn(long cards, DataType bet, State *root, State *device_root, Vector *vectors, int *state_index,
+                int *vector_index) {
     *root = {.terminal = NonTerminal,
             .action = DealTurn,
             .cards = cards,
@@ -145,7 +145,9 @@ build_post_turn_kernel(long cards, DataType bet, State *root, State *device_root
             .card_strategies = {},
             .next_states =  {}};
     *state_index += 1;
-    build(root, 0, root, device_root, vectors, state_index, vector_index);
+    int count = build(root, 0, root, device_root, vectors, state_index, vector_index);
+    //printf("count: %d\n",count); // 270
+    //fflush(stdout);
 }
 
 
@@ -171,7 +173,7 @@ State **build_turn_cuda(long cards, DataType bet) {
         cudaMalloc(&vectors, vectors_size);
         cudaMemset(vectors, 0, vectors_size);
 
-        build_post_turn_kernel(new_cards, bet, root, device_root, vectors, &state_index, &vector_index);
+        build_post_turn(new_cards, bet, root, device_root, vectors, &state_index, &vector_index);
         cudaMemcpy(device_root, root, state_size, cudaMemcpyHostToDevice);
         cudaDeviceSynchronize();
         err = cudaGetLastError();

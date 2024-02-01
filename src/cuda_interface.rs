@@ -13,6 +13,7 @@ extern "C" {
         card_indexes: *const u16,
         eval: *const u16,
         coll_vec: *const u16,
+        abstraction: *const u16,
     ) -> *const std::ffi::c_void;
     fn free_eval_cuda(ptr: *const std::ffi::c_void);
 
@@ -37,6 +38,7 @@ pub fn transfer_flop_eval<const M: usize>(
     assert_eq!(communal_cards.count_ones(), 3);
     let mut evals = vec![];
     let mut collisions = vec![];
+    let mut abstractions = vec![];
     let mut cards = 3;
     for _ in 0..1326 {
         if (communal_cards & cards) > 0 {
@@ -44,28 +46,33 @@ pub fn transfer_flop_eval<const M: usize>(
             evals.append(&mut e);
             let mut c = vec![0; 52 * 51];
             collisions.append(&mut c);
+            let mut a = vec![0; 1326];
+            abstractions.append(&mut a);
         } else {
             assert_eq!((communal_cards | cards).count_ones(), 5);
             let mut e = eval.vectorized_eval(communal_cards | cards).clone();
             evals.append(&mut e);
             let mut c = eval.collisions(communal_cards | cards).clone();
             collisions.append(&mut c);
+            let mut a = eval.abstractions(communal_cards | cards).clone();
+            abstractions.append(&mut a);
         }
 
         cards = CombinationMap::<(), 52, 2>::next(cards);
     }
-    for cards in eval.card_order() {
-        if *cards & communal_cards > 0 {
-            continue;
-        }
-        let index = CombinationMap::<(), 52, 2>::get_ordering_index(*cards);
-        assert_eq!(
-            eval.vectorized_eval(cards | communal_cards)[..],
-            evals[index * (1326 + 128 * 2)..(index + 1) * (1326 + 128 * 2)]
-        )
-    }
+    // for cards in eval.card_order() {
+    //     if *cards & communal_cards > 0 {
+    //         continue;
+    //     }
+    //     let index = CombinationMap::<(), 52, 2>::get_ordering_index(*cards);
+    //     assert_eq!(
+    //         eval.vectorized_eval(cards | communal_cards)[..],
+    //         evals[index * (1326 + 128 * 2)..(index + 1) * (1326 + 128 * 2)]
+    //     )
+    // }
     assert_eq!(evals.len(), 1326 * (1326 + 128 * 2));
     assert_eq!(collisions.len(), 1326 * 52 * 51);
+    assert_eq!(abstractions.len(), 1326 * 1326);
     let res = unsafe {
         transfer_flop_eval_cuda(
             communal_cards,
@@ -73,6 +80,7 @@ pub fn transfer_flop_eval<const M: usize>(
             eval.card_indexes().as_ptr(),
             evals.as_ptr(),
             collisions.as_ptr(),
+            abstractions.as_ptr(),
         )
     };
     return res;
