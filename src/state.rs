@@ -192,19 +192,17 @@ impl<const M: usize> State<M> {
             }
             DealRiver => {
                 let deck = Card::generate_deck();
-                let mut next_states = Vec::new();
+                // A bit of a hack, need 5 cards for building, but the last card added is symbolic only
                 for river in deck {
                     let num_river = evaluator.cards_to_u64(&[river]);
                     if (num_river & self.cards) > 0 {
                         continue;
                     }
-                    let mut next_state = state.clone();
-                    next_state.terminal = NonTerminal;
-                    next_state.cards = self.cards | num_river;
-                    next_state.next_to_act = Small;
-                    next_states.push(next_state);
+                    state.terminal = NonTerminal;
+                    state.cards = self.cards | num_river;
+                    state.next_to_act = Small;
+                    break;
                 }
-                return next_states;
             }
             DealHole => panic!("DealHole should only be used in root of game"),
         }
@@ -219,6 +217,7 @@ impl<const M: usize> State<M> {
         updating_player: Player,
         calc_exploit: bool,
         gpu_eval_ptr: Option<Pointer>,
+        communal_cards: u64,
     ) -> Vector {
         //(util of sb, util of bb, exploitability of updating player)
         let opponent_range = match updating_player {
@@ -235,7 +234,7 @@ impl<const M: usize> State<M> {
                 };
                 let mut results = vec![];
 
-                let strategy = self.card_strategies.get_strategy(evaluator, self.cards);
+                let strategy = self.card_strategies.get_strategy(evaluator, communal_cards);
                 assert_eq!(self.next_states.len(), strategy.len());
 
                 for (next, action_prob) in zip(self.next_states.iter_mut(), strategy) {
@@ -247,6 +246,7 @@ impl<const M: usize> State<M> {
                             updating_player,
                             calc_exploit,
                             gpu_eval_ptr,
+                            communal_cards,
                         ),
 
                         Big => next.evaluate_state(
@@ -256,6 +256,7 @@ impl<const M: usize> State<M> {
                             updating_player,
                             calc_exploit,
                             gpu_eval_ptr,
+                            communal_cards,
                         ),
                     };
 
@@ -279,13 +280,15 @@ impl<const M: usize> State<M> {
                         update.push(util - average_strategy);
                     }
                     self.card_strategies
-                        .update_add(&update, evaluator, self.cards);
+                        .update_add(&update, evaluator, communal_cards);
                 }
 
                 average_strategy
             }
 
-            Showdown => self.evaluate_showdown(opponent_range, evaluator, updating_player),
+            Showdown => {
+                self.evaluate_showdown(opponent_range, evaluator, updating_player, communal_cards)
+            }
             SBWins => self.evaluate_fold(opponent_range, evaluator, updating_player, Big),
             BBWins => self.evaluate_fold(opponent_range, evaluator, updating_player, Small),
             Flop => {
@@ -309,6 +312,7 @@ impl<const M: usize> State<M> {
                         updating_player,
                         calc_exploit,
                         Some(eval_ptr),
+                        next_state.cards,
                     );
                     // For safety for the future
                     for i in 0..1326 {
@@ -336,74 +340,83 @@ impl<const M: usize> State<M> {
                     gpu
                 } else {
                     let mut total = Vector::default();
-                    for next_state in self.next_states.iter_mut() {
-                        let mut new_sb_range = *sb_range;
-                        let mut new_bb_range = *bb_range;
-                        // It is impossible to have hands which contains flop cards
-                        for i in 0..1326 {
-                            if (evaluator.card_order()[i] & next_state.cards) > 0 {
-                                new_sb_range[i] = 0.0;
-                                new_bb_range[i] = 0.0;
+                    let res = self
+                        .next_states
+                        .par_iter_mut()
+                        //.iter_mut()
+                        .map(|next_state| {
+                            let mut new_sb_range = *sb_range;
+                            let mut new_bb_range = *bb_range;
+                            // It is impossible to have hands which contains flop cards
+                            for i in 0..1326 {
+                                if (evaluator.card_order()[i] & next_state.cards) > 0 {
+                                    new_sb_range[i] = 0.0;
+                                    new_bb_range[i] = 0.0;
+                                }
                             }
-                        }
-                        let mut res = next_state.evaluate_state(
-                            &new_sb_range,
-                            &new_bb_range,
-                            evaluator,
-                            updating_player,
-                            calc_exploit,
-                            gpu_eval_ptr,
-                        );
-                        // For safety for the future
-                        for i in 0..1326 {
-                            if (evaluator.card_order()[i] & next_state.cards) > 0 {
-                                res[i] = 0.0;
+                            let mut res = next_state.evaluate_state(
+                                &new_sb_range,
+                                &new_bb_range,
+                                evaluator,
+                                updating_player,
+                                calc_exploit,
+                                gpu_eval_ptr,
+                                next_state.cards,
+                            );
+                            for i in 0..1326 {
+                                if (evaluator.card_order()[i] & next_state.cards) > 0 {
+                                    res[i] = 0.0;
+                                }
                             }
-                        }
-                        total += res;
+                            res
+                        })
+                        .collect::<Vec<_>>();
+                    for val in res {
+                        total += val;
                     }
-                    total *= 1.0 / (self.next_states.len() as Float);
-                    total
+
+                    total * (1.0 / (self.next_states.len() as Float))
                 }
             }
             River => {
                 let mut total = Vector::default();
-                let res = self
-                    .next_states
-                    .par_iter_mut()
-                    //.iter_mut()
-                    .map(|next_state| {
-                        let mut new_sb_range = *sb_range;
-                        let mut new_bb_range = *bb_range;
-                        // It is impossible to have hands which contains flop cards
-                        for i in 0..1326 {
-                            if (evaluator.card_order()[i] & next_state.cards) > 0 {
-                                new_sb_range[i] = 0.0;
-                                new_bb_range[i] = 0.0;
-                            }
+                assert_eq!(self.next_states.len(), 1);
+                let next_state = &mut self.next_states[0];
+                let mut count = 0;
+                for river_card in 0..52 {
+                    let num_river = 1 << river_card;
+                    if num_river & communal_cards > 0 {
+                        continue;
+                    }
+                    count += 1;
+                    let new_cards = communal_cards | num_river;
+                    let mut new_sb_range = *sb_range;
+                    let mut new_bb_range = *bb_range;
+                    // It is impossible to have hands which contains flop cards
+                    for i in 0..1326 {
+                        if (evaluator.card_order()[i] & new_cards) > 0 {
+                            new_sb_range[i] = 0.0;
+                            new_bb_range[i] = 0.0;
                         }
-                        let mut res = next_state.evaluate_state(
-                            &new_sb_range,
-                            &new_bb_range,
-                            evaluator,
-                            updating_player,
-                            calc_exploit,
-                            gpu_eval_ptr,
-                        );
-                        for i in 0..1326 {
-                            if (evaluator.card_order()[i] & next_state.cards) > 0 {
-                                res[i] = 0.0;
-                            }
+                    }
+                    let mut res = next_state.evaluate_state(
+                        &new_sb_range,
+                        &new_bb_range,
+                        evaluator,
+                        updating_player,
+                        calc_exploit,
+                        gpu_eval_ptr,
+                        new_cards,
+                    );
+                    for i in 0..1326 {
+                        if (evaluator.card_order()[i] & new_cards) > 0 {
+                            res[i] = 0.0;
                         }
-                        res
-                    })
-                    .collect::<Vec<_>>();
-                for val in res {
-                    total += val;
+                    }
+                    total += res;
                 }
-
-                let res = total * (1.0 / (self.next_states.len() as Float));
-                res
+                assert_eq!(count, 48);
+                total * (1.0 / 48.0)
             }
         }
     }
@@ -451,6 +464,7 @@ impl<const M: usize> State<M> {
         opponent_range: &Vector,
         evaluator: &Evaluator<M>,
         updating_player: Player,
+        communal_cards: u64,
     ) -> Vector {
         let mut result = Vector::default();
         let card_order = evaluator.card_order();
@@ -459,7 +473,7 @@ impl<const M: usize> State<M> {
             Big => (self.bbbet, self.sbbet),
         };
 
-        let sorted = &evaluator.vectorized_eval(self.cards);
+        let sorted = &evaluator.vectorized_eval(communal_cards);
         let mut groups = vec![];
         let mut current = vec![sorted[0] & 2047];
         for &eval in sorted[1..1326].iter() {

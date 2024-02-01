@@ -36,6 +36,7 @@ impl<const M: usize> Game<M> {
             Small,
             false,
             None,
+            0,
         );
 
         let _ = self.root.evaluate_state(
@@ -45,6 +46,7 @@ impl<const M: usize> Game<M> {
             Big,
             false,
             None,
+            0,
         );
         let iter_time = start.elapsed().as_secs_f32();
         if iter % 10 == 0 {
@@ -55,6 +57,7 @@ impl<const M: usize> Game<M> {
                 Small,
                 true,
                 None,
+                0,
             );
             let exp_bb = self.root.evaluate_state(
                 &Vector::ones(),
@@ -63,6 +66,7 @@ impl<const M: usize> Game<M> {
                 Big,
                 true,
                 None,
+                0,
             );
             println!(
                 "Iteration {} done \n\
