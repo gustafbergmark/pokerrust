@@ -40,9 +40,9 @@ impl<const M: usize> Evaluator<M> {
             .collect();
 
         let (vectorized_eval, collisions, abstractions) =
-            match std::fs::read("./files/eval_small.bin") {
+            /*match std::fs::read("./files/eval_small.bin") {
                 Ok(eval) => bincode::deserialize(&eval).expect("Failed to deserialize"),
-                Err(_) => {
+                Err(_) =>*/ {
                     let evaluator = poker::Evaluator::new();
                     // For full game
                     //let deck = Card::generate_deck();
@@ -129,7 +129,7 @@ impl<const M: usize> Evaluator<M> {
                                 }
                             }
 
-                            let abstractions = phs(M, &result, &card_order);
+                            let abstractions = phs(M, &result, &card_order, num_hand);
 
                             (num_hand, result, coll_vec, abstractions)
                         })
@@ -145,16 +145,16 @@ impl<const M: usize> Evaluator<M> {
                         abstraction_map.insert(key, abstraction);
                     }
                     let result = (order_map, collision_map, abstraction_map);
-                    match std::fs::write(
-                        "./files/eval_small.bin",
-                        bincode::serialize(&result).expect("Failed to serialize"),
-                    ) {
-                        Ok(_) => println!("Created vectorized_eval"),
-                        Err(e) => panic!("{}", e),
-                    }
+                    // match std::fs::write(
+                    //     "./files/eval_small.bin",
+                    //     bincode::serialize(&result).expect("Failed to serialize"),
+                    // ) {
+                    //     Ok(_) => println!("Created vectorized_eval"),
+                    //     Err(e) => panic!("{}", e),
+                    // }
                     result
-                }
-            };
+                };
+        //};
 
         let mut card_indexes_builder = vec![vec![]; 52];
         for (i, cards) in card_order.iter().enumerate() {
@@ -240,9 +240,12 @@ pub fn separate_cards(mut cards: u64) -> [usize; 2] {
     res[1] = cards.trailing_zeros() as usize;
     res
 }
-fn phs(abstractions: usize, evaluation: &Vec<u16>, card_order: &Vec<u64>) -> Vec<u32> {
-    // 1225 other hands
-
+fn phs(
+    abstractions: usize,
+    evaluation: &Vec<u16>,
+    card_order: &Vec<u64>,
+    communal_cards: u64,
+) -> Vec<u32> {
     let sorted = evaluation;
     let mut groups = vec![];
     let mut current = vec![sorted[0] & 2047];
@@ -267,6 +270,9 @@ fn phs(abstractions: usize, evaluation: &Vec<u16>, card_order: &Vec<u64>) -> Vec
         for &index in group {
             let index = index as usize;
             let cards = card_order[index];
+            if cards & communal_cards > 0 {
+                continue;
+            }
             let card = separate_cards(cards);
             res[index] += cumulative;
             current_cumulative += 2;
@@ -278,7 +284,11 @@ fn phs(abstractions: usize, evaluation: &Vec<u16>, card_order: &Vec<u64>) -> Vec
         for &index in group {
             let index = index as usize;
             let cards = card_order[index];
+            if cards & communal_cards > 0 {
+                continue;
+            }
             let card = separate_cards(cards);
+            // +1 because inclusion exclusion
             res[index] += current_cumulative + 1;
             for c in card {
                 res[index] -= current_collisions[c];
@@ -289,9 +299,9 @@ fn phs(abstractions: usize, evaluation: &Vec<u16>, card_order: &Vec<u64>) -> Vec
             collisions[i] += current_collisions[i];
         }
     }
+    // 5 communal cards, 2 on own hand leads to 45 choose 2 opponent hands
     for elem in res.iter_mut() {
-        *elem = (*elem * abstractions as u32) / (1225 * 2);
+        *elem = (*elem * abstractions as u32) / (990 * 2);
     }
-
     res
 }
