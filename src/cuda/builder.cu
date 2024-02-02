@@ -152,26 +152,43 @@ build_post_turn(long cards, DataType bet, State *root, State *device_root, Vecto
 
 
 extern "C" {
-State **build_turn_cuda(long cards, DataType bet) {
+Builder *init_builder() {
+    Builder *builder = (Builder *) calloc(1, sizeof(Builder));
+    builder->current_index = 0;
+    cudaMalloc(&builder->states, 63 * 49 * 270 * sizeof(State));
+    cudaMalloc(&builder->vectors, 63 * 49 * 260 * sizeof(Vector));
+    cudaMemset(builder->vectors, 0, 63 * 49 * 260 * sizeof(Vector));
+    cudaMallocHost(&builder->communication, 63 * sizeof(Vector));
+    cudaMalloc(&builder->opponent_ranges, 63 * sizeof(Vector));
+    cudaMalloc(&builder->results, 63 * sizeof(Vector));
+    printf("GPU builder created\n");
+    fflush(stdout);
+    return builder;
+}
+
+void upload_c(Builder *builder, int index, DataType *vector) {
+    memcpy(builder->communication + index, vector, 1326 * sizeof(DataType));
+}
+
+void download_c(Builder *builder, int index, DataType *vector) {
+    memcpy(vector, builder->communication + index, 1326 * sizeof(DataType));
+}
+
+int build_turn_cuda(long cards, DataType bet, Builder *builder) {
     cudaError_t err;
-    int count = 0;
-    State **states = (State **) calloc(49, sizeof(State *));
+    int start = builder->current_index;
     for (int c = 0; c < 52; c++) {
         long turn = 1l << c;
         if (cards & turn) continue;
         long new_cards = cards | turn;
         int vector_index = 0;
         int state_index = 0;
-        int state_size = sizeof(State) * (27 * 48 * 9 + 27);
+        int state_size = sizeof(State) * (27 * 9 + 27);
         State *root = (State *) malloc(state_size);
 
-        State *device_root;
-        cudaMalloc(&device_root, state_size);
-
-        Vector *vectors;
-        int vectors_size = sizeof(Vector) * (26 * 48 * 9 + 26);
-        cudaMalloc(&vectors, vectors_size);
-        cudaMemset(vectors, 0, vectors_size);
+        State *device_root = builder->states + builder->current_index * 270;
+        Vector *vectors = builder->vectors + builder->current_index * 260;
+        builder->current_index += 1;
 
         build_post_turn(new_cards, bet, root, device_root, vectors, &state_index, &vector_index);
         cudaMemcpy(device_root, root, state_size, cudaMemcpyHostToDevice);
@@ -181,9 +198,7 @@ State **build_turn_cuda(long cards, DataType bet) {
             printf("Build error: %s\n", cudaGetErrorString(err));
             fflush(stdout);
         }
-        states[count] = device_root;
-        count++;
     }
-    return states;
+    return start / 49;
 }
 }

@@ -1,14 +1,15 @@
+use crate::cuda_interface::{evaluate_gpu, free_eval, transfer_flop_eval};
 use crate::enums::Player::{Big, Small};
 use crate::evaluator::Evaluator;
-use crate::state::State;
+use crate::state::{Pointer, State};
 use crate::vector::Vector;
-use poker::card;
 use std::fmt::{Debug, Formatter};
 use std::time::Instant;
 
 pub(crate) struct Game<const M: usize> {
     root: State<M>,
     evaluator: Evaluator<M>,
+    builder: Pointer,
 }
 
 impl<const M: usize> Debug for Game<M> {
@@ -18,26 +19,57 @@ impl<const M: usize> Debug for Game<M> {
 }
 
 impl<const M: usize> Game<M> {
-    pub fn new(root: State<M>, evaluator: Evaluator<M>) -> Self {
-        let _kuhn_hands: Vec<u64> = vec![
-            evaluator.cards_to_u64(&[card!(Jack, Hearts)]),
-            evaluator.cards_to_u64(&[card!(Queen, Hearts)]),
-            evaluator.cards_to_u64(&[card!(King, Hearts)]),
-        ];
-        Game { root, evaluator }
+    pub fn new(root: State<M>, evaluator: Evaluator<M>, builder: Pointer) -> Self {
+        Game {
+            root,
+            evaluator,
+            builder,
+        }
     }
 
     pub fn perform_iter(&mut self, iter: usize) {
         let start = Instant::now();
+        // 7 is the fixed flop
+        let eval_ptr = Pointer(transfer_flop_eval(&self.evaluator, 7));
+
+        if cfg!(feature = "GPU") {
+            let _ = self.root.evaluate_state(
+                &Vector::ones(),
+                &Vector::ones(),
+                &self.evaluator,
+                Small,
+                false,
+                0,
+                self.builder,
+                false,
+            );
+            evaluate_gpu(self.builder, eval_ptr, Small, false);
+        }
+        println!("Iteration time: {}s", start.elapsed().as_secs_f32());
         let _ = self.root.evaluate_state(
             &Vector::ones(),
             &Vector::ones(),
             &self.evaluator,
             Small,
             false,
-            None,
             0,
+            self.builder,
+            false,
         );
+
+        if cfg!(feature = "GPU") {
+            let _ = self.root.evaluate_state(
+                &Vector::ones(),
+                &Vector::ones(),
+                &self.evaluator,
+                Big,
+                false,
+                0,
+                self.builder,
+                true,
+            );
+            evaluate_gpu(self.builder, eval_ptr, Big, false);
+        }
 
         let _ = self.root.evaluate_state(
             &Vector::ones(),
@@ -45,28 +77,57 @@ impl<const M: usize> Game<M> {
             &self.evaluator,
             Big,
             false,
-            None,
             0,
+            self.builder,
+            false,
         );
         let iter_time = start.elapsed().as_secs_f32();
         if iter % 10 == 0 {
+            if cfg!(feature = "GPU") {
+                let _ = self.root.evaluate_state(
+                    &Vector::ones(),
+                    &Vector::ones(),
+                    &self.evaluator,
+                    Small,
+                    true,
+                    0,
+                    self.builder,
+                    true,
+                );
+                evaluate_gpu(self.builder, eval_ptr, Small, true);
+            }
             let exp_sb = self.root.evaluate_state(
                 &Vector::ones(),
                 &Vector::ones(),
                 &self.evaluator,
                 Small,
                 true,
-                None,
                 0,
+                self.builder,
+                false,
             );
+            if cfg!(feature = "GPU") {
+                let _ = self.root.evaluate_state(
+                    &Vector::ones(),
+                    &Vector::ones(),
+                    &self.evaluator,
+                    Big,
+                    true,
+                    0,
+                    self.builder,
+                    true,
+                );
+                evaluate_gpu(self.builder, eval_ptr, Big, true);
+            }
             let exp_bb = self.root.evaluate_state(
                 &Vector::ones(),
                 &Vector::ones(),
                 &self.evaluator,
                 Big,
                 true,
-                None,
                 0,
+                self.builder,
+                false,
             );
             println!(
                 "Iteration {} done \n\
@@ -79,5 +140,6 @@ impl<const M: usize> Game<M> {
                 start.elapsed().as_secs_f32() - iter_time,
             );
         }
+        free_eval(eval_ptr);
     }
 }

@@ -34,7 +34,7 @@ struct __align__(512) Vector {
 DataType values[1326];
 };
 
-struct State {
+struct __align__(32) State {
     TerminalState terminal;
     Action action;
     long cards;
@@ -50,6 +50,15 @@ struct Context {
     State *state;
     Vector *opponent_range;
     int transition;
+};
+
+struct Builder {
+    int current_index;
+    State *states;
+    Vector *vectors;
+    Vector *communication;
+    Vector *opponent_ranges;
+    Vector *results;
 };
 
 

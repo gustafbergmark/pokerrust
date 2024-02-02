@@ -548,7 +548,7 @@ __device__ void evaluate_river(Vector *opponent_range_root,
     }
 }
 
-__global__ void evaluate_turn(Vector *opponent_range_root,
+__device__ void evaluate_turn(Vector *opponent_range_root,
                               State *root_state,
                               Evaluator *evaluator,
                               Player updating_player,
@@ -599,7 +599,8 @@ __global__ void evaluate_turn(Vector *opponent_range_root,
                     int eval_index = get_index(set);
                     short *eval = evaluator->eval + eval_index * (1326 + 128 * 2);
                     short *coll_vec = evaluator->coll_vec + eval_index * 52 * 51;
-                    evaluate_river(new_range, next, evaluator, state->cards | river, evaluator->card_indexes, eval, coll_vec,
+                    evaluate_river(new_range, next, evaluator, state->cards | river, evaluator->card_indexes, eval,
+                                   coll_vec,
                                    updating_player,
                                    calc_exploit, scratch_root + (depth + 1) * 10, temp);
                     remove_collisions(result + 10, river);
@@ -612,18 +613,28 @@ __global__ void evaluate_turn(Vector *opponent_range_root,
     }
     // Remove utility of impossible hands
     remove_collisions(scratch_root, root_state->cards);
-
 }
 
-__global__ void aggregate(Vector *scratch) {
-    for (int i = 1; i < 49; i++) {
-        add_assign(scratch, scratch + 10 * 14 * i);
-    }
+__global__ void evaluate_all(Vector* root_scratch, Vector *opponent_ranges, State* root_states, Evaluator *evaluator, Player updating_player, bool calc_exploit) {
+    int block = blockIdx.x;
+    Vector* scratch = root_scratch + 10 * 14 * block;
+    Vector* opponent_range = opponent_ranges + block / 49;
+    State* states = root_states + 270 * block;
+    evaluate_turn(opponent_range, states, evaluator, updating_player, calc_exploit, scratch);
+}
+
+__global__ void aggregate(Vector *root_scratch, Vector* root_result) {
     int i = threadIdx.x;
+    int block = blockIdx.x;
+    Vector* scratch = root_scratch + block * 10 * 14 * 49;
+    Vector* result = root_result + block;
+    for (int i = 1; i < 49; i++) {
+        add_assign(result, scratch + 10 * 14 * i);
+    }
     for (int b = 0; b < ITERS; b++) {
         int index = i + TPB * b;
         if (index < 1326) {
-            scratch->values[index] /= 49.0f;
+            result->values[index] /= 49.0f;
         }
     }
 }
@@ -636,48 +647,43 @@ double cpuSecond() {
 
 extern "C" {
 
-void evaluate_turn_cuda(DataType *opponent_range,
-                        State **states,
-                        Evaluator *evaluator,
-                        short updating_player,
-                        bool calc_exploit,
-                        DataType *result) {
-    DataType *turns;
-    cudaMallocHost(&turns, 1326 * sizeof(DataType) * 49);
-    DataType *pinned_range;
-    cudaMallocHost(&pinned_range, 1326 * sizeof(DataType));
-    memcpy(pinned_range, opponent_range, 1326 * sizeof(DataType));
-    memset(result, 0, 1326 * sizeof(DataType));
-    cudaStream_t stream[49];
-    Vector *device_opponent_ranges;
-    cudaMalloc(&device_opponent_ranges, sizeof(Vector) * 49);
-
+void evaluate_cuda(Builder *builder,
+                   Evaluator *evaluator,
+                   short updating_player,
+                   bool calc_exploit) {
+    cudaError_t err;
     Vector *device_scratch;
-    int scratch_size = sizeof(Vector) * 10 * 14;
-    cudaMalloc(&device_scratch, scratch_size * 49);
-    cudaMemset(device_scratch, 0, scratch_size * 49);
-
-
-    for (int i = 0; i < 49; i++) cudaStreamCreate(&stream[i]);
-
-    for (int i = 0; i < 49; i++) {
-        State *state = states[i];
-        cudaMemcpyAsync(&device_opponent_ranges[i], pinned_range, 1326 * sizeof(DataType), cudaMemcpyHostToDevice,
-                        stream[i]);
-        // Result will always be put in scratch[0..1326]
-        evaluate_turn<<<1, TPB, 0, stream[i]>>>(&device_opponent_ranges[i], state, evaluator,
-                                                updating_player == 0 ? Small : Big, calc_exploit,
-                                                device_scratch + 10 * 14 * i);
-        //cudaDeviceSynchronize();
+    size_t scratch_size = sizeof(Vector) * 10 * 14 * 49 * 63;
+    cudaMalloc(&device_scratch, scratch_size);
+    cudaMemset(device_scratch, 0, scratch_size);
+    cudaMemcpy(builder->opponent_ranges, builder->communication, 63 * sizeof (Vector), cudaMemcpyHostToDevice);
+    cudaMemset(builder->results, 0, 63 * sizeof (Vector));
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("Setup error: %s\n", cudaGetErrorString(err));
+        fflush(stdout);
     }
+    evaluate_all<<<49*63, 128>>>(device_scratch, builder->opponent_ranges, builder->states, evaluator, updating_player == 0 ? Small : Big, calc_exploit);
     cudaDeviceSynchronize();
-    for (int i = 0; i < 49; i++) cudaStreamDestroy(stream[i]);
-    aggregate<<<1, 128>>>(device_scratch);
-    cudaMemcpy(result, device_scratch, 1326 * sizeof(DataType), cudaMemcpyDeviceToHost);
-    cudaFreeHost(turns);
-    cudaFreeHost(pinned_range);
-    cudaFree(device_opponent_ranges);
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("Main execution error: %s\n", cudaGetErrorString(err));
+        fflush(stdout);
+    }
+    aggregate<<<63,128>>>(device_scratch, builder->results);
+    cudaMemcpy(builder->communication, builder->results, 63*sizeof (Vector), cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("Aggregation error: %s\n", cudaGetErrorString(err));
+        fflush(stdout);
+    }
     cudaFree(device_scratch);
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("Execution error: %s\n", cudaGetErrorString(err));
+        fflush(stdout);
+    }
 }
 }
 

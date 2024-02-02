@@ -5,8 +5,11 @@ use crate::state::Pointer;
 use crate::vector::{Float, Vector};
 
 extern "C" {
+    fn init_builder() -> *const std::ffi::c_void;
 
-    fn build_turn_cuda(cards: u64, bet: Float) -> *const std::ffi::c_void;
+    fn upload_c(builder: *const std::ffi::c_void, index: i32, v: *const Float);
+    fn download_c(builder: *const std::ffi::c_void, index: i32, v: *mut Float);
+    fn build_turn_cuda(cards: u64, bet: Float, builder: *const std::ffi::c_void) -> i32;
     fn transfer_flop_eval_cuda(
         flop: u64,
         card_order: *const u64,
@@ -17,19 +20,29 @@ extern "C" {
     ) -> *const std::ffi::c_void;
     fn free_eval_cuda(ptr: *const std::ffi::c_void);
 
-    fn evaluate_turn_cuda(
-        opponent_range: *const Float,
-        states: *const std::ffi::c_void,
+    fn evaluate_cuda(
+        builder: *const std::ffi::c_void,
         evaluator: *const std::ffi::c_void,
         updating_player: u16,
         calc_exploit: bool,
-        result: *mut Float,
     );
 
 }
 
-pub fn build_turn(cards: u64, bet: Float) -> *const std::ffi::c_void {
-    unsafe { build_turn_cuda(cards, bet) }
+pub fn upload_gpu(builder: Pointer, index: i32, v: &Vector) {
+    unsafe { upload_c(builder.0, index, v.values.as_ptr()) }
+}
+
+pub fn download_gpu(builder: Pointer, index: i32) -> Vector {
+    let mut result = Vector::default();
+    unsafe { download_c(builder.0, index, result.values.as_mut_ptr()) };
+    result
+}
+pub fn initialize_builder() -> Pointer {
+    Pointer(unsafe { init_builder() })
+}
+pub fn build_turn(cards: u64, bet: Float, builder: Pointer) -> i32 {
+    unsafe { build_turn_cuda(cards, bet, builder.0) }
 }
 pub fn transfer_flop_eval<const M: usize>(
     eval: &Evaluator<M>,
@@ -92,27 +105,17 @@ pub fn free_eval(ptr: Pointer) {
     }
 }
 
-pub fn evaluate_turn_gpu(
-    states: Pointer,
+pub fn evaluate_gpu(
+    builder: Pointer,
     evaluator: Pointer,
-    opponent_range: &Vector,
     updating_player: Player,
     calc_exploit: bool,
-) -> Vector {
-    let mut result = Vector::default();
+) {
     let updating_player = match updating_player {
         Player::Small => 0,
         Player::Big => 1,
     };
     unsafe {
-        evaluate_turn_cuda(
-            opponent_range.values.as_ptr(),
-            states.0,
-            evaluator.0,
-            updating_player,
-            calc_exploit,
-            result.values.as_mut_ptr(),
-        );
+        evaluate_cuda(builder.0, evaluator.0, updating_player, calc_exploit);
     }
-    result
 }

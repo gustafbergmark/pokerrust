@@ -1,4 +1,4 @@
-use crate::cuda_interface::{build_turn, evaluate_turn_gpu, free_eval, transfer_flop_eval};
+use crate::cuda_interface::{build_turn, download_gpu, upload_gpu};
 use crate::enums::Action::*;
 use crate::enums::Player::*;
 use crate::enums::TerminalState::*;
@@ -30,7 +30,7 @@ pub(crate) struct State<const M: usize> {
     card_strategies: Strategy<M>,
     next_states: Vec<State<M>>,
     permutations: Vec<[Suit; 4]>,
-    gpu_pointer: Option<Pointer>,
+    gpu_pointer: Option<i32>,
 }
 
 impl<const M: usize> State<M> {
@@ -62,7 +62,12 @@ impl<const M: usize> State<M> {
         }
     }
 
-    pub fn get_action(&self, action: Action, evaluator: &Evaluator<M>) -> Vec<State<M>> {
+    pub fn get_action(
+        &self,
+        action: Action,
+        evaluator: &Evaluator<M>,
+        builder: Pointer,
+    ) -> Vec<State<M>> {
         let opponent = match self.next_to_act {
             Small => Big,
             Big => Small,
@@ -106,7 +111,7 @@ impl<const M: usize> State<M> {
                     0 => state.terminal = Flop,
                     3 => {
                         let gpu_pointer = if cfg!(feature = "GPU") {
-                            Some(Pointer(build_turn(self.cards, other_bet)))
+                            Some(build_turn(self.cards, other_bet, builder))
                         } else {
                             None
                         };
@@ -216,8 +221,9 @@ impl<const M: usize> State<M> {
         evaluator: &Evaluator<M>,
         updating_player: Player,
         calc_exploit: bool,
-        gpu_eval_ptr: Option<Pointer>,
         communal_cards: u64,
+        builder: Pointer,
+        upload: bool,
     ) -> Vector {
         //(util of sb, util of bb, exploitability of updating player)
         let opponent_range = match updating_player {
@@ -245,8 +251,9 @@ impl<const M: usize> State<M> {
                             evaluator,
                             updating_player,
                             calc_exploit,
-                            gpu_eval_ptr,
                             communal_cards,
+                            builder,
+                            upload,
                         ),
 
                         Big => next.evaluate_state(
@@ -255,8 +262,9 @@ impl<const M: usize> State<M> {
                             evaluator,
                             updating_player,
                             calc_exploit,
-                            gpu_eval_ptr,
                             communal_cards,
+                            builder,
+                            upload,
                         ),
                     };
 
@@ -274,7 +282,7 @@ impl<const M: usize> State<M> {
                     }
                 }
                 // update strategy
-                if self.next_to_act == updating_player && !calc_exploit {
+                if self.next_to_act == updating_player && !calc_exploit && !upload {
                     let mut update = vec![];
                     for util in results {
                         update.push(util - average_strategy);
@@ -295,7 +303,6 @@ impl<const M: usize> State<M> {
                 let mut total = Vector::default();
                 let mut count = 0.0;
                 for next_state in self.next_states.iter_mut() {
-                    let eval_ptr = Pointer(transfer_flop_eval(evaluator, next_state.cards));
                     let mut new_sb_range = *sb_range;
                     let mut new_bb_range = *bb_range;
                     // It is impossible to have hands which contains flop cards
@@ -311,8 +318,9 @@ impl<const M: usize> State<M> {
                         evaluator,
                         updating_player,
                         calc_exploit,
-                        Some(eval_ptr),
                         next_state.cards,
+                        builder,
+                        upload,
                     );
                     // For safety for the future
                     for i in 0..1326 {
@@ -324,20 +332,22 @@ impl<const M: usize> State<M> {
                         count += 1.0;
                         total += permute(permutation, res, evaluator)
                     }
-                    free_eval(eval_ptr);
                 }
                 total * (1.0 / count)
             }
             Turn => {
                 if cfg!(feature = "GPU") {
-                    let gpu = evaluate_turn_gpu(
-                        self.gpu_pointer.expect("GPU pointer missing"),
-                        gpu_eval_ptr.expect("GPU eval missing"),
-                        opponent_range,
-                        updating_player,
-                        calc_exploit,
-                    );
-                    gpu
+                    if upload {
+                        upload_gpu(
+                            builder,
+                            self.gpu_pointer.expect("Missing GPU index"),
+                            opponent_range,
+                        );
+                        // No updates during upload, return does not matter
+                        Vector::default()
+                    } else {
+                        download_gpu(builder, self.gpu_pointer.expect("Missing GPU index"))
+                    }
                 } else {
                     let mut total = Vector::default();
                     let res = self
@@ -360,8 +370,9 @@ impl<const M: usize> State<M> {
                                 evaluator,
                                 updating_player,
                                 calc_exploit,
-                                gpu_eval_ptr,
                                 next_state.cards,
+                                builder,
+                                upload,
                             );
                             for i in 0..1326 {
                                 if (evaluator.card_order()[i] & next_state.cards) > 0 {
@@ -405,8 +416,9 @@ impl<const M: usize> State<M> {
                         evaluator,
                         updating_player,
                         calc_exploit,
-                        gpu_eval_ptr,
                         new_cards,
+                        builder,
+                        upload,
                     );
                     for i in 0..1326 {
                         if (evaluator.card_order()[i] & new_cards) > 0 {

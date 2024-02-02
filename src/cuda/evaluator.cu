@@ -50,7 +50,7 @@ Evaluator *transfer_flop_eval_cuda(long flop, long *card_order, short *card_inde
 
     err = cudaGetLastError();
     if (err != cudaSuccess) {
-        printf("Error: %s\n", cudaGetErrorString(err));
+        printf("Evaluator error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
     }
     return device_eval;
