@@ -77,7 +77,7 @@ __device__ void zero(Vector *v) {
     for (int b = 0; b < ITERS; b++) {
         int index = i + TPB * b;
         if (index < 1326) {
-            v->values[index] = 0;
+            v->values[index] = 0.0f;
         }
     }
 }
@@ -94,7 +94,7 @@ __device__ void p_sum(DataType *input, int i) {
         offset *= 2;
     }
     if (i == 0) {
-        input[TPB - 1] = 0;
+        input[TPB - 1] = 0.0f;
     }
     for (int d = 1; d < TPB; d *= 2) {
         offset >>= 1;
@@ -144,7 +144,7 @@ __device__ DataType reduce_sum(DataType *vector, DataType *temp) {
         }
     }
     __syncthreads();
-    for (int k = 64; k > 0; k /= 2) {
+    for (int k = 64; k > 0; k >>= 1) {
         if (i < k) {
             temp[i] += temp[i + k];
         }
@@ -165,8 +165,8 @@ __device__ void get_strategy(State *state, Vector *scratch, Vector *result) {
         for (int b = 0; b < ITERS; b++) {
             int index = tid + TPB * b;
             if (index < 1326) {
-                if (sum->values[index] <= 1e-4) {
-                    result[i].values[index] = 1.0 / ((DataType) transitions);
+                if (sum->values[index] <= 1e-4f) {
+                    result[i].values[index] = 1.0f / ((DataType) transitions);
                 } else {
                     result[i].values[index] = state->card_strategies[i]->values[index] / sum->values[index];
                 }
@@ -193,8 +193,8 @@ get_strategy_abstract(State *state, Vector *scratch, Vector *result, long commun
         if (index < 1326) {
             short abstract_index = abstractions[index];
             for (int k = 0; k < transitions; k++) {
-                if (sum->values[abstract_index] <= 1e-4) {
-                    result[k].values[index] = 1.0 / ((DataType) transitions);
+                if (sum->values[abstract_index] <= 1e-4f) {
+                    result[k].values[index] = 1.0f / ((DataType) transitions);
                 } else {
                     result[k].values[index] =
                             state->card_strategies[k]->values[abstract_index] / sum->values[abstract_index];
@@ -212,7 +212,7 @@ __device__ void update_strategy(State *__restrict__ state, Vector *__restrict__ 
         for (int b = 0; b < ITERS; b++) {
             int index = tid + TPB * b;
             if (index < 1326) {
-                state->card_strategies[i]->values[index] = max(state->card_strategies[i]->values[index], 0.0);
+                state->card_strategies[i]->values[index] = max(state->card_strategies[i]->values[index], 0.0f);
             }
         }
     }
@@ -239,7 +239,7 @@ __device__ void update_strategy_abstract(State *__restrict__ state, Vector *__re
         for (int b = 0; b < ((ABSTRACTIONS + TPB - 1) / TPB); b++) {
             int index = tid + TPB * b;
             if (index < ABSTRACTIONS) {
-                state->card_strategies[k]->values[index] = max(state->card_strategies[k]->values[index], 0.0);
+                state->card_strategies[k]->values[index] = max(state->card_strategies[k]->values[index], 0.0f);
             }
         }
     }
@@ -255,14 +255,14 @@ handle_collisions(short *coll_vec,
     // First two warps handles forward direction
     if (i < 52) {
         int offset = i * 51;
-        DataType sum = 0.0;
-        DataType group_sum = 0.0;
+        DataType sum = 0.0f;
+        DataType group_sum = 0.0f;
         for (int c = 0; c < 51; c++) {
             int index = coll_vec[offset + c];
             // 2048 bit set => new group
             if (index & 2048) {
                 sum += group_sum;
-                group_sum = 0.0;
+                group_sum = 0.0f;
             }
             atomicAdd(&sorted_eval[index & 2047], -sum);
             group_sum += sorted_range[index & 2047];
@@ -273,8 +273,8 @@ handle_collisions(short *coll_vec,
     if ((i >= 64) && (i < (52 + 64))) {
         int temp_i = i - 64;
         int offset = temp_i * 51;
-        DataType sum = 0.0;
-        DataType group_sum = 0.0;
+        DataType sum = 0.0f;
+        DataType group_sum = 0.0f;
         for (int c = 0; c < 51; c++) {
             // Go backwards
             int index = coll_vec[offset + 50 - c];
@@ -285,7 +285,7 @@ handle_collisions(short *coll_vec,
             // 2048 bit set => new group
             if (index & 2048) {
                 sum += group_sum;
-                group_sum = 0.0;
+                group_sum = 0.0f;
             }
         }
     }
@@ -308,12 +308,12 @@ evaluate_showdown(DataType *opponent_range, short *eval,
         int index = i + TPB * b;
         if (index < 1326) {
             // reset values
-            sorted_eval[index] = 0;
-            result[index] = 0;
+            sorted_eval[index] = 0.0f;
+            result[index] = 0.0f;
             sorted_range[index] = opponent_range[eval[index] & 2047];
         }
         if (index == 1326) {
-            sorted_range[index] = 0;
+            sorted_range[index] = 0.0f;
         }
     }
 
@@ -375,7 +375,7 @@ evaluate_fold(Vector *opponent_range, short *card_indexes, DataType bet, Vector 
 
     __syncthreads();
     temp[i] = 0;
-    DataType card_sum = 0.0;
+    DataType card_sum = 0.0f;
     if (i < 52) {
         for (int c = 0; c < 26; c++) {
             short index = card_indexes[i * 51 + c];
@@ -606,7 +606,7 @@ __device__ void evaluate_turn(Vector *opponent_range_root,
                     remove_collisions(result + 10, river);
                     add_assign(result, result + 10);
                 }
-                divide(result, (DataType) 48);
+                divide(result, 48.0f);
                 depth--;
                 break;
         }
