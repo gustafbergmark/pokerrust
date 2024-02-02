@@ -6,6 +6,9 @@
 #define POKERRUST_STRUCTS_H
 
 #define DataType float
+#define TPB 128
+#define ITERS 11
+#define ABSTRACTIONS 256
 
 enum TerminalState {
     NonTerminal,
@@ -34,6 +37,10 @@ struct __align__(512) Vector {
 DataType values[1326];
 };
 
+struct __align__(512) AbstractVector {
+DataType values[ABSTRACTIONS];
+};
+
 struct __align__(32) State {
     TerminalState terminal;
     Action action;
@@ -56,6 +63,7 @@ struct Builder {
     int current_index;
     State *states;
     Vector *vectors;
+    AbstractVector *abstract_vectors;
     Vector *communication;
     Vector *opponent_ranges;
     Vector *results;

@@ -6,11 +6,6 @@
 #include <sys/time.h>
 #include <cmath>
 
-#define TPB 128
-#define ITERS 11
-#define ABSTRACTIONS 256
-
-
 __device__ void multiply(Vector *__restrict__ v1, Vector *__restrict__ v2, Vector *__restrict__ res) {
     int i = threadIdx.x;
     for (int b = 0; b < ITERS; b++) {
@@ -182,11 +177,14 @@ get_strategy_abstract(State *state, Vector *scratch, Vector *result, long commun
     long eval_index = get_index(turn_river);
     short *abstractions = evaluator->abstractions + eval_index * 1326;
     Vector *sum = scratch;
-    zero(sum);
     int transitions = state->transitions;
+    DataType vals[2] = {0.0f,0.0f};
     for (int k = 0; k < transitions; k++) {
-        add_assign(sum, state->card_strategies[k]);
+        vals[0] += state->card_strategies[k]->values[tid];
+        vals[1] += state->card_strategies[k]->values[tid+128];
     }
+    sum->values[tid] = vals[0];
+    sum->values[tid+128] = vals[1];
     __syncthreads();
     for (int b = 0; b < ITERS; b++) {
         int index = tid + TPB * b;
@@ -236,12 +234,8 @@ __device__ void update_strategy_abstract(State *__restrict__ state, Vector *__re
     }
     __syncthreads();
     for (int k = 0; k < state->transitions; k++) {
-        for (int b = 0; b < ((ABSTRACTIONS + TPB - 1) / TPB); b++) {
-            int index = tid + TPB * b;
-            if (index < ABSTRACTIONS) {
-                state->card_strategies[k]->values[index] = max(state->card_strategies[k]->values[index], 0.0f);
-            }
-        }
+        state->card_strategies[k]->values[tid] = max(state->card_strategies[k]->values[tid], 0.0f);
+        state->card_strategies[k]->values[tid+128] = max(state->card_strategies[k]->values[tid+128], 0.0f);
     }
     __syncthreads();
 }

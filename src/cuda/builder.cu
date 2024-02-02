@@ -82,7 +82,6 @@ int get_action(State *state, Action action, State *new_states) {
                 new_states->terminal = NonTerminal;
                 break;
             }
-            return 1;
         case DealTurn :
             // will not happen
             return 0;
@@ -91,10 +90,17 @@ int get_action(State *state, Action action, State *new_states) {
 }
 
 void
-add_transition(State *parent, State *child, Vector *vectors, int *vector_index, State *root, State *device_root) {
+add_transition(State *parent, State *child, Vector *vectors, int *vector_index, State *root, State *device_root,
+               AbstractVector *abstract_vectors, int *abstract_vector_index) {
     if (parent->terminal == NonTerminal) {
-        parent->card_strategies[parent->transitions] = vectors + *vector_index;
-        *vector_index += 1;
+        if( __builtin_popcountll(parent->cards) < 5) {
+            parent->card_strategies[parent->transitions] = vectors + *vector_index;
+            *vector_index += 1;
+        } else {
+            // Hideous but should work
+            parent->card_strategies[parent->transitions] = (Vector*)(abstract_vectors + *abstract_vector_index);
+            *abstract_vector_index += 1;
+        }
     }
     // Update pointers to work on gpu;
     parent->next_states[parent->transitions] = device_root + (child - root);
@@ -103,38 +109,30 @@ add_transition(State *parent, State *child, Vector *vectors, int *vector_index, 
 
 
 int build(State *state, short raises, State *root, State *device_root, Vector *vectors, int *state_index,
-          int *vector_index) {
+          int *vector_index, AbstractVector *abstract_vectors, int *abstract_vector_index) {
     Action actions[3] = {};
     int count = 1;
     int num_actions = possible_actions(state, raises, actions);
     for (int i = 0; i < num_actions; i++) {
         Action action = actions[i];
         int new_raises = action == Raise ? raises + 1 : 0;
-        if (action == DealRiver) {
-            State temp[48];
-            int num_states = get_action(state, action, temp);
-            for (int j = 0; j < num_states; j++) {
-                State *new_state = root + *state_index;
-                *new_state = temp[j];
-                *state_index += 1;
-                count += build(new_state, new_raises, root, device_root, vectors, state_index, vector_index);
-                add_transition(state, new_state, vectors, vector_index, root, device_root);
-            }
-        } else {
-            State *new_state = root + *state_index;
-            get_action(state, action, new_state);
-            *state_index += 1;
-            count += build(new_state, new_raises, root, device_root, vectors, state_index, vector_index);
-            add_transition(state, new_state, vectors, vector_index, root, device_root);
 
-        }
+        State *new_state = root + *state_index;
+        get_action(state, action, new_state);
+        *state_index += 1;
+        count += build(new_state, new_raises, root, device_root, vectors, state_index, vector_index,
+                       abstract_vectors, abstract_vector_index);
+        add_transition(state, new_state, vectors, vector_index, root, device_root, abstract_vectors,
+                       abstract_vector_index);
+
+
     }
     return count;
 }
 
 void
 build_post_turn(long cards, DataType bet, State *root, State *device_root, Vector *vectors, int *state_index,
-                int *vector_index) {
+                int *vector_index, AbstractVector *abstract_vectors, int *abstract_vector_index) {
     *root = {.terminal = NonTerminal,
             .action = DealTurn,
             .cards = cards,
@@ -145,7 +143,8 @@ build_post_turn(long cards, DataType bet, State *root, State *device_root, Vecto
             .card_strategies = {},
             .next_states =  {}};
     *state_index += 1;
-    int count = build(root, 0, root, device_root, vectors, state_index, vector_index);
+    int count = build(root, 0, root, device_root, vectors, state_index, vector_index, abstract_vectors,
+                      abstract_vector_index);
     //printf("count: %d\n",count); // 270
     //fflush(stdout);
 }
@@ -156,8 +155,10 @@ Builder *init_builder() {
     Builder *builder = (Builder *) calloc(1, sizeof(Builder));
     builder->current_index = 0;
     cudaMalloc(&builder->states, 63 * 49 * 270 * sizeof(State));
-    cudaMalloc(&builder->vectors, 63 * 49 * 260 * sizeof(Vector));
-    cudaMemset(builder->vectors, 0, 63 * 49 * 260 * sizeof(Vector));
+    cudaMalloc(&builder->vectors, 63 * 49 * 26 * sizeof(Vector));
+    cudaMemset(builder->vectors, 0, 63 * 49 * 26 * sizeof(Vector));
+    cudaMalloc(&builder->abstract_vectors, 63 * 49 * 26 * 9 * sizeof(AbstractVector));
+    cudaMemset(builder->abstract_vectors, 0, 63 * 49 * 26 * 9 * sizeof(AbstractVector));
     cudaMallocHost(&builder->communication, 63 * sizeof(Vector));
     cudaMalloc(&builder->opponent_ranges, 63 * sizeof(Vector));
     cudaMalloc(&builder->results, 63 * sizeof(Vector));
@@ -182,15 +183,18 @@ int build_turn_cuda(long cards, DataType bet, Builder *builder) {
         if (cards & turn) continue;
         long new_cards = cards | turn;
         int vector_index = 0;
+        int abstract_vector_index = 0;
         int state_index = 0;
         int state_size = sizeof(State) * (27 * 9 + 27);
         State *root = (State *) malloc(state_size);
 
         State *device_root = builder->states + builder->current_index * 270;
-        Vector *vectors = builder->vectors + builder->current_index * 260;
+        Vector *vectors = builder->vectors + builder->current_index * 26;
+        AbstractVector *abstract_vectors = builder->abstract_vectors + builder->current_index * 26 * 9;
         builder->current_index += 1;
 
-        build_post_turn(new_cards, bet, root, device_root, vectors, &state_index, &vector_index);
+        build_post_turn(new_cards, bet, root, device_root, vectors, &state_index, &vector_index, abstract_vectors,
+                        &abstract_vector_index);
         cudaMemcpy(device_root, root, state_size, cudaMemcpyHostToDevice);
         cudaDeviceSynchronize();
         err = cudaGetLastError();
