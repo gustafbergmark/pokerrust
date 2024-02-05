@@ -1,4 +1,4 @@
-use crate::cuda_interface::{build_turn, download_gpu, upload_gpu};
+use crate::cuda_interface::{build_river, download_gpu, upload_gpu};
 use crate::enums::Action::*;
 use crate::enums::Player::*;
 use crate::enums::TerminalState::*;
@@ -109,16 +109,16 @@ impl<const M: usize> State<M> {
                 state.bbbet = other_bet;
                 match self.cards.count_ones() {
                     0 => state.terminal = Flop,
-                    3 => {
+                    3 => state.terminal = Turn,
+                    4 => {
                         let gpu_pointer = if cfg!(feature = "GPU") {
-                            Some(build_turn(self.cards, other_bet, builder))
+                            Some(build_river(self.cards, other_bet, builder))
                         } else {
                             None
                         };
-                        state.terminal = Turn;
+                        state.terminal = River;
                         state.gpu_pointer = gpu_pointer;
                     }
-                    4 => state.terminal = River,
                     5 => state.terminal = Showdown,
                     _ => panic!("Wrong number of communal cards"),
                 }
@@ -336,6 +336,46 @@ impl<const M: usize> State<M> {
                 total * (1.0 / count)
             }
             Turn => {
+                let mut total = Vector::default();
+                let res = self
+                    .next_states
+                    .par_iter_mut()
+                    //.iter_mut()
+                    .map(|next_state| {
+                        let mut new_sb_range = *sb_range;
+                        let mut new_bb_range = *bb_range;
+                        // It is impossible to have hands which contains flop cards
+                        for i in 0..1326 {
+                            if (evaluator.card_order()[i] & next_state.cards) > 0 {
+                                new_sb_range[i] = 0.0;
+                                new_bb_range[i] = 0.0;
+                            }
+                        }
+                        let mut res = next_state.evaluate_state(
+                            &new_sb_range,
+                            &new_bb_range,
+                            evaluator,
+                            updating_player,
+                            calc_exploit,
+                            next_state.cards,
+                            builder,
+                            upload,
+                        );
+                        for i in 0..1326 {
+                            if (evaluator.card_order()[i] & next_state.cards) > 0 {
+                                res[i] = 0.0;
+                            }
+                        }
+                        res
+                    })
+                    .collect::<Vec<_>>();
+                for val in res {
+                    total += val;
+                }
+
+                total * (1.0 / (self.next_states.len() as Float))
+            }
+            River => {
                 if cfg!(feature = "GPU") {
                     if upload {
                         upload_gpu(
@@ -350,85 +390,45 @@ impl<const M: usize> State<M> {
                     }
                 } else {
                     let mut total = Vector::default();
-                    let res = self
-                        .next_states
-                        .par_iter_mut()
-                        //.iter_mut()
-                        .map(|next_state| {
-                            let mut new_sb_range = *sb_range;
-                            let mut new_bb_range = *bb_range;
-                            // It is impossible to have hands which contains flop cards
-                            for i in 0..1326 {
-                                if (evaluator.card_order()[i] & next_state.cards) > 0 {
-                                    new_sb_range[i] = 0.0;
-                                    new_bb_range[i] = 0.0;
-                                }
-                            }
-                            let mut res = next_state.evaluate_state(
-                                &new_sb_range,
-                                &new_bb_range,
-                                evaluator,
-                                updating_player,
-                                calc_exploit,
-                                next_state.cards,
-                                builder,
-                                upload,
-                            );
-                            for i in 0..1326 {
-                                if (evaluator.card_order()[i] & next_state.cards) > 0 {
-                                    res[i] = 0.0;
-                                }
-                            }
-                            res
-                        })
-                        .collect::<Vec<_>>();
-                    for val in res {
-                        total += val;
-                    }
-
-                    total * (1.0 / (self.next_states.len() as Float))
-                }
-            }
-            River => {
-                let mut total = Vector::default();
-                assert_eq!(self.next_states.len(), 1);
-                let next_state = &mut self.next_states[0];
-                let mut count = 0;
-                for river_card in 0..52 {
-                    let num_river = 1 << river_card;
-                    if num_river & communal_cards > 0 {
-                        continue;
-                    }
-                    count += 1;
-                    let new_cards = communal_cards | num_river;
-                    let mut new_sb_range = *sb_range;
-                    let mut new_bb_range = *bb_range;
-                    // It is impossible to have hands which contains flop cards
-                    for i in 0..1326 {
-                        if (evaluator.card_order()[i] & new_cards) > 0 {
-                            new_sb_range[i] = 0.0;
-                            new_bb_range[i] = 0.0;
+                    assert_eq!(self.next_states.len(), 1);
+                    let next_state = &mut self.next_states[0];
+                    let mut count = 0;
+                    for river_card in 0..52 {
+                        let num_river = 1 << river_card;
+                        if num_river & communal_cards > 0 {
+                            continue;
                         }
-                    }
-                    let mut res = next_state.evaluate_state(
-                        &new_sb_range,
-                        &new_bb_range,
-                        evaluator,
-                        updating_player,
-                        calc_exploit,
-                        new_cards,
-                        builder,
-                        upload,
-                    );
-                    for i in 0..1326 {
-                        if (evaluator.card_order()[i] & new_cards) > 0 {
-                            res[i] = 0.0;
+                        count += 1;
+                        let new_cards = communal_cards | num_river;
+                        let mut new_sb_range = *sb_range;
+                        let mut new_bb_range = *bb_range;
+                        // It is impossible to have hands which contains flop cards
+                        for i in 0..1326 {
+                            if (evaluator.card_order()[i] & new_cards) > 0 {
+                                new_sb_range[i] = 0.0;
+                                new_bb_range[i] = 0.0;
+                            }
                         }
+                        let mut res = next_state.evaluate_state(
+                            &new_sb_range,
+                            &new_bb_range,
+                            evaluator,
+                            updating_player,
+                            calc_exploit,
+                            new_cards,
+                            builder,
+                            upload,
+                        );
+                        for i in 0..1326 {
+                            if (evaluator.card_order()[i] & new_cards) > 0 {
+                                res[i] = 0.0;
+                            }
+                        }
+                        total += res;
                     }
-                    total += res;
+                    assert_eq!(count, 48);
+                    total * (1.0 / 48.0)
                 }
-                assert_eq!(count, 48);
-                total * (1.0 / 48.0)
             }
         }
     }

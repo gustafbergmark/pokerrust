@@ -9,7 +9,7 @@ extern "C" {
 
     fn upload_c(builder: *const std::ffi::c_void, index: i32, v: *const Float);
     fn download_c(builder: *const std::ffi::c_void, index: i32, v: *mut Float);
-    fn build_turn_cuda(cards: u64, bet: Float, builder: *const std::ffi::c_void) -> i32;
+    fn build_river_cuda(cards: u64, bet: Float, builder: *const std::ffi::c_void) -> i32;
     fn transfer_flop_eval_cuda(
         flop: u64,
         card_order: *const u64,
@@ -41,8 +41,8 @@ pub fn download_gpu(builder: Pointer, index: i32) -> Vector {
 pub fn initialize_builder() -> Pointer {
     Pointer(unsafe { init_builder() })
 }
-pub fn build_turn(cards: u64, bet: Float, builder: Pointer) -> i32 {
-    unsafe { build_turn_cuda(cards, bet, builder.0) }
+pub fn build_river(cards: u64, bet: Float, builder: Pointer) -> i32 {
+    unsafe { build_river_cuda(cards, bet, builder.0) }
 }
 pub fn transfer_flop_eval<const M: usize>(
     eval: &Evaluator<M>,

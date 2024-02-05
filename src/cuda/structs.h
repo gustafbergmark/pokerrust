@@ -24,7 +24,6 @@ enum Action {
     Call,
     Raise,
     DealRiver,
-    DealTurn
 };
 
 // 0 = Small, 1 = Big
@@ -49,7 +48,7 @@ struct __align__(32) State {
     DataType bbbet;
     Player next_to_act;
     short transitions;
-    Vector *card_strategies[3];
+    AbstractVector *card_strategies[3];
     State *next_states[3];
     State *parent;
 };
@@ -57,7 +56,6 @@ struct __align__(32) State {
 struct Builder {
     int current_index;
     State *states;
-    Vector *vectors;
     AbstractVector *abstract_vectors;
     Vector *communication;
     Vector *opponent_ranges;

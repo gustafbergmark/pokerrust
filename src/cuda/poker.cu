@@ -149,28 +149,6 @@ __device__ DataType reduce_sum(DataType *vector, DataType *temp) {
     return temp[0];
 }
 
-__device__ void get_strategy(State *state, Vector *scratch, Vector *result) {
-    int tid = threadIdx.x;
-    Vector *sum = scratch;
-    zero(sum);
-    int transitions = state->transitions;
-    for (int i = 0; i < transitions; i++) {
-        add_assign(sum, state->card_strategies[i]);
-    }
-    for (int i = 0; i < transitions; i++) {
-        for (int b = 0; b < ITERS; b++) {
-            int index = tid + TPB * b;
-            if (index < 1326) {
-                if (sum->values[index] <= 1e-4f) {
-                    result[i].values[index] = 1.0f / ((DataType) transitions);
-                } else {
-                    result[i].values[index] = state->card_strategies[i]->values[index] / sum->values[index];
-                }
-            }
-        }
-    }
-}
-
 __device__ void
 get_strategy_abstract(State *state, Vector *scratch, Vector *result, short *abstractions) {
     int tid = threadIdx.x;
@@ -200,19 +178,6 @@ get_strategy_abstract(State *state, Vector *scratch, Vector *result, short *abst
         }
     }
     __syncthreads();
-}
-
-__device__ void update_strategy(State *__restrict__ state, Vector *__restrict__ update) {
-    int tid = threadIdx.x;
-    for (int i = 0; i < state->transitions; i++) {
-        add_assign(state->card_strategies[i], update + i);
-        for (int b = 0; b < ITERS; b++) {
-            int index = tid + TPB * b;
-            if (index < 1326) {
-                state->card_strategies[i]->values[index] = max(state->card_strategies[i]->values[index], 0.0f);
-            }
-        }
-    }
 }
 
 __device__ void update_strategy_abstract(State *__restrict__ state, Vector *__restrict__ update,
@@ -284,10 +249,11 @@ handle_collisions(short *coll_vec,
 
 __device__ void
 evaluate_showdown(DataType *opponent_range, short *eval,
-                  short *coll_vec, DataType bet, Vector *scratch,
-                  DataType *temp) {
+                  short *coll_vec, DataType bet, Vector *scratch) {
     __syncthreads();
     return;
+    __shared__ DataType temp[128];
+
     DataType *result = (DataType *) scratch;
     DataType *sorted_range = (DataType *) (scratch + 1);
     DataType *sorted_eval = (DataType *) (scratch + 2);
@@ -354,10 +320,10 @@ evaluate_showdown(DataType *opponent_range, short *eval,
 
 
 __device__ void
-evaluate_fold(Vector *opponent_range, short *card_indexes, DataType bet, Vector *result,
-              DataType *temp) {
+evaluate_fold(Vector *opponent_range, short *card_indexes, DataType bet, Vector *result) {
     __syncthreads();
     return;
+    __shared__ DataType temp[128];
     // Setup
     int i = threadIdx.x;
     copy(opponent_range, result);
@@ -421,9 +387,6 @@ handle_node(Vector *scratch, State **state_ptr, int *transition_count, short upd
     State *state = *state_ptr;
     int transitions = state->transitions;
     Vector *average_strategy = scratch;
-    Vector *opponent_range = scratch + 1;
-    Vector *action_probs = scratch + 2;
-    Vector *results = scratch + 2 + transitions;
     int transition = (*transition_count >> (2 * *depth)) & 3;
     if (transition == 0) {
         if ((updating_player == state->next_to_act) && calc_exploit) {
@@ -436,226 +399,113 @@ handle_node(Vector *scratch, State **state_ptr, int *transition_count, short upd
         } else {
             zero(average_strategy);
         }
-        if (__popcll(communal_cards) < 5) {
-            get_strategy(state, scratch, action_probs);
-        } else {
-            get_strategy_abstract(state, scratch, action_probs, abstractions);
-        }
     } else {
-        int i = transition - 1;
-        Vector *new_result = average_strategy + 10;
-        copy(new_result, results + i);
+        Vector *new_result = average_strategy + 1;
         if (updating_player == state->next_to_act) {
             if (!calc_exploit) {
-                fma(results + i, action_probs + i, average_strategy);
+                //fma(results + i, action_probs + i, average_strategy); // TODO! fix this
             } else {
                 for (int b = 0; b < ITERS; b++) {
                     int index = tid + TPB * b;
                     if (index < 1326) {
                         average_strategy->values[index] = max(average_strategy->values[index],
-                                                              (results + i)->values[index]);
+                                                              new_result->values[index]);
                     }
                 }
             }
         } else {
-            add_assign(average_strategy, results + i);
+            add_assign(average_strategy, new_result);
         }
     }
 
     if (transition == transitions) {
         if ((state->next_to_act == updating_player) && !calc_exploit) {
-            for (int i = 0; i < transitions; i++) {
-                Vector *util = results + i;
-                sub_assign(util, average_strategy);
-            }
-            if (__popcll(communal_cards) < 5) {
-                update_strategy(state, results);
-            } else {
-                update_strategy_abstract(state, results, abstractions);
-            }
+            // update strategy TODO
         }
         *state_ptr = state->parent;
         (*depth)--;
     } else {
-        int i = transition;
-        State *next = state->next_states[i];
-        Vector *new_range = opponent_range + 10;
-        if (state->next_to_act == updating_player) {
-            copy(opponent_range, new_range);
-        } else {
-            multiply(opponent_range, action_probs + i, new_range);
-        }
+        State *next = state->next_states[transition];
+        // update action prob TODO
         *state_ptr = next;
         // Reset transition count for depth + 1
-        *transition_count &= ~(3 << ((*depth + 1)*2));
+        *transition_count &= ~(3 << ((*depth + 1) * 2));
         *transition_count += 1 << (*depth * 2);
         (*depth)++;
     }
 }
 
-__device__ void evaluate_river(Vector *opponent_range_root,
+__device__ void evaluate_river(Vector *opponent_range,
                                State *root_state,
-                               Evaluator *evaluator,
+                               Vector *scratch,
                                long communal_cards,
                                short *card_indexes,
                                short *eval,
                                short *coll_vec,
+                               short *abstractions,
                                Player updating_player,
-                               bool calc_exploit,
-                               Vector *scratch_root,
-                               DataType *temp,
-                               short *abstractions) {
-    int tid = threadIdx.x;
-    __shared__ short local_abstractions[1326];
-    for (int b = 0; b < ITERS; b++) {
-        int index = tid + 128 * b;
-        if (index < 1326) {
-            local_abstractions[index] = abstractions[index];
-        }
-    }
+                               bool calc_exploit) {
     __syncthreads();
     State *state = root_state;
     // Every 2 bits signifies the transition count at a specific depth
     int transitions = 0;
-    // Scratch + 1 is position of opponent range at each level
-    copy(opponent_range_root, scratch_root + 1);
-
     int depth = 0;
     while (depth >= 0) {
-        Vector *scratch = scratch_root + depth * 10;
-        Vector *opponent_range = scratch + 1;
         switch (state->terminal) {
             case Showdown :
                 evaluate_showdown(opponent_range->values, eval,
-                                  coll_vec, state->sbbet, scratch,
-                                  temp);
+                                  coll_vec, state->sbbet, scratch);
                 state = state->parent;
                 depth--;
                 break;
             case SBWins :
                 evaluate_fold(opponent_range,
-                              card_indexes, updating_player == 1 ? -state->bbbet : state->bbbet, scratch,
-                              temp);
+                              card_indexes, updating_player == 1 ? -state->bbbet : state->bbbet, scratch);
                 state = state->parent;
                 depth--;
                 break;
             case BBWins :
                 evaluate_fold(opponent_range,
                               card_indexes,
-                              updating_player == 0 ? -state->sbbet : state->sbbet, scratch, temp);
+                              updating_player == 0 ? -state->sbbet : state->sbbet, scratch);
                 state = state->parent;
                 depth--;
                 break;
             case NonTerminal : {
                 handle_node(scratch, &state, &transitions, updating_player, calc_exploit, &depth, communal_cards,
-                            local_abstractions);
+                            abstractions);
                 break;
             }
         }
     }
 }
 
-__device__ void evaluate_turn(Vector *opponent_range_root,
-                              State *root_state,
-                              Evaluator *evaluator,
-                              Player updating_player,
-                              bool calc_exploit,
-                              Vector *scratch_root) {
-    __shared__ DataType temp[128];
-    // Remove possibility of impossible hands
-    remove_collisions(opponent_range_root, root_state->cards);
-    State *state = root_state;
-    // Every 2 bits signifies the transition count at a specific depth
-    int transitions = 0;
-    // Scratch + 1 is position of opponent range at each level
-    copy(opponent_range_root, scratch_root + 1);
-    int depth = 0;
-
-    while (depth >= 0) {
-        Vector *scratch = scratch_root + depth * 10;
-        Vector *opponent_range = scratch + 1;
-
-        switch (state->terminal) {
-            case SBWins :
-                evaluate_fold(opponent_range,
-                              evaluator->card_indexes, updating_player == 1 ? -state->bbbet : state->bbbet, scratch,
-                              temp);
-                state = state->parent;
-                depth--;
-                break;
-            case BBWins :
-                evaluate_fold(opponent_range,
-                              evaluator->card_indexes,
-                              updating_player == 0 ? -state->sbbet : state->sbbet, scratch, temp);
-                state = state->parent;
-                depth--;
-                break;
-            case NonTerminal : {
-                handle_node(scratch, &state, &transitions, updating_player, calc_exploit, &depth, state->cards,
-                            nullptr);
-                break;
-            }
-            case River:
-                Vector *result = scratch;
-                zero(result);
-                State *next = state->next_states[0];
-                for (int c = 0; c < 52; c++) {
-                    long river = 1l << c;
-                    if (river & state->cards) continue;
-                    Vector *new_range = scratch + 10 + 1;
-                    copy(opponent_range, new_range);
-                    remove_collisions(new_range, river);
-                    long set = (state->cards | river) ^ evaluator->flop;
-                    int eval_index = get_index(set);
-                    short *eval = evaluator->eval + eval_index * (1326 + 128 * 2);
-                    short *coll_vec = evaluator->coll_vec + eval_index * 52 * 51;
-                    evaluate_river(new_range, next, evaluator, state->cards | river, evaluator->card_indexes, eval,
-                                   coll_vec,
-                                   updating_player,
-                                   calc_exploit, scratch_root + (depth + 1) * 10, temp,
-                                   evaluator->abstractions + eval_index * 1326);
-                    remove_collisions(result + 10, river);
-                    add_assign(result, result + 10);
-                }
-                divide(result, 48.0f);
-                state = state->parent;
-                depth--;
-                break;
-        }
-    }
-    // Remove utility of impossible hands
-    remove_collisions(scratch_root, root_state->cards);
-}
-
-__global__ void evaluate_all(Vector *root_scratch, Vector *opponent_ranges, State *root_states, Evaluator *evaluator,
-                             Player updating_player, bool calc_exploit) {
+__global__ void evaluate_all(Vector *opponent_ranges, Vector *results, State *root_states, Evaluator *evaluator,
+                             Player updating_player, bool calc_exploit, Vector *scratches) {
     int block = blockIdx.x;
-    Vector *scratch = root_scratch + 10 * 14 * block;
-    Vector *opponent_range = opponent_ranges + block / 49;
-    State *states = root_states + 270 * block;
-    evaluate_turn(opponent_range, states, evaluator, updating_player, calc_exploit, scratch);
-}
-
-__global__ void aggregate(Vector *root_scratch, Vector *root_result) {
-    int i = threadIdx.x;
-    int block = blockIdx.x;
-    Vector *scratch = root_scratch + block * 10 * 14 * 49;
-    Vector *result = root_result + block;
-    for (int i = 1; i < 49; i++) {
-        add_assign(result, scratch + 10 * 14 * i);
+    Vector *opponent_range = opponent_ranges + block;
+    Vector *result = results + block;
+    State *state = root_states + 28 * block;
+    Vector *scratch = scratches + 8 * block;
+    State *next = state->next_states[0];
+    for (int c = 0; c < 52; c++) {
+        long river = 1l << c;
+        if (river & state->cards) continue;
+        Vector *new_range = scratch;
+        copy(opponent_range, new_range);
+        remove_collisions(new_range, river);
+        long set = (state->cards | river) ^ evaluator->flop;
+        int eval_index = get_index(set);
+        short *eval = evaluator->eval + eval_index * (1326 + 128 * 2);
+        short *coll_vec = evaluator->coll_vec + eval_index * 52 * 51;
+        evaluate_river(new_range, next, scratch + 1, state->cards | river, evaluator->card_indexes, eval,
+                       coll_vec, evaluator->abstractions + eval_index * 1326,
+                       updating_player, calc_exploit);
+        remove_collisions(result + 10, river);
+        add_assign(result, result + 10);
     }
-    for (int b = 0; b < ITERS; b++) {
-        int index = i + TPB * b;
-        if (index < 1326) {
-            result->values[index] /= 49.0f;
-        }
-    }
-}
-
-double cpuSecond() {
-    struct timeval tp;
-    gettimeofday(&tp, NULL);
-    return ((double) tp.tv_sec + (double) tp.tv_usec * 1.e-6);
+    divide(result, 48.0f);
+    remove_collisions(result, state->cards);
 }
 
 extern "C" {
@@ -666,38 +516,33 @@ void evaluate_cuda(Builder *builder,
                    bool calc_exploit) {
     cudaError_t err;
     Vector *device_scratch;
-    size_t scratch_size = sizeof(Vector) * 10 * 14 * 49 * 63;
+    size_t scratch_size = sizeof(Vector) * 63 * 49 * 9 * 8; // 8 scratch per kernel
     cudaMalloc(&device_scratch, scratch_size);
     cudaMemset(device_scratch, 0, scratch_size);
-    cudaMemcpy(builder->opponent_ranges, builder->communication, 63 * sizeof(Vector), cudaMemcpyHostToDevice);
-    cudaMemset(builder->results, 0, 63 * sizeof(Vector));
+    cudaMemcpy(builder->opponent_ranges, builder->communication, 63 * 49 * 9 * sizeof(Vector), cudaMemcpyHostToDevice);
+    cudaMemset(builder->results, 0, 63 * 49 * 9 * sizeof(Vector));
     err = cudaGetLastError();
     if (err != cudaSuccess) {
         printf("Setup error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
     }
-    evaluate_all<<<49 * 63, 128>>>(device_scratch, builder->opponent_ranges, builder->states, evaluator,
-                                   updating_player == 0 ? Small : Big, calc_exploit);
+    evaluate_all<<< 63 * 49 * 9, 128>>>(builder->opponent_ranges, builder->results, builder->states, evaluator,
+                                        updating_player == 0 ? Small : Big, calc_exploit, device_scratch);
     cudaDeviceSynchronize();
     err = cudaGetLastError();
     if (err != cudaSuccess) {
         printf("Main execution error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
     }
-    aggregate<<<63, 128>>>(device_scratch, builder->results);
-    cudaMemcpy(builder->communication, builder->results, 63 * sizeof(Vector), cudaMemcpyDeviceToHost);
+    cudaMemcpy(builder->communication, builder->results, 63 * 49 * 9 * sizeof(Vector), cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
+    cudaFree(device_scratch);
     err = cudaGetLastError();
     if (err != cudaSuccess) {
         printf("Aggregation error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
     }
-    cudaFree(device_scratch);
-    err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("Execution error: %s\n", cudaGetErrorString(err));
-        fflush(stdout);
-    }
+
 }
 }
 

@@ -33,10 +33,6 @@ int possible_actions(State *state, short raises, Action *result) {
             result[0] = Check;
             result[1] = Raise;
             return 2;
-        case DealTurn :
-            result[0] = Check;
-            result[1] = Raise;
-            return 2;
     }
     return 0;
 }
@@ -82,25 +78,16 @@ int get_action(State *state, Action action, State *new_states) {
                 new_states->terminal = NonTerminal;
                 break;
             }
-        case DealTurn :
-            // will not happen
-            return 0;
     }
     return 1;
 }
 
 void
-add_transition(State *parent, State *child, Vector *vectors, int *vector_index, State *root, State *device_root,
+add_transition(State *parent, State *child, State *root, State *device_root,
                AbstractVector *abstract_vectors, int *abstract_vector_index) {
     if (parent->terminal == NonTerminal) {
-        if( __builtin_popcountll(parent->cards) < 5) {
-            parent->card_strategies[parent->transitions] = vectors + *vector_index;
-            *vector_index += 1;
-        } else {
-            // Hideous but should work
-            parent->card_strategies[parent->transitions] = (Vector*)(abstract_vectors + *abstract_vector_index);
-            *abstract_vector_index += 1;
-        }
+        parent->card_strategies[parent->transitions] = (abstract_vectors + *abstract_vector_index);
+        *abstract_vector_index += 1;
     }
     // Update pointers to work on gpu;
     parent->next_states[parent->transitions] = device_root + (child - root);
@@ -109,8 +96,8 @@ add_transition(State *parent, State *child, Vector *vectors, int *vector_index, 
 }
 
 
-int build(State *state, short raises, State *root, State *device_root, Vector *vectors, int *state_index,
-          int *vector_index, AbstractVector *abstract_vectors, int *abstract_vector_index) {
+int build(State *state, short raises, State *root, State *device_root, int *state_index,
+          AbstractVector *abstract_vectors, int *abstract_vector_index) {
     Action actions[3] = {};
     int count = 1;
     int num_actions = possible_actions(state, raises, actions);
@@ -121,9 +108,9 @@ int build(State *state, short raises, State *root, State *device_root, Vector *v
         State *new_state = root + *state_index;
         get_action(state, action, new_state);
         *state_index += 1;
-        count += build(new_state, new_raises, root, device_root, vectors, state_index, vector_index,
+        count += build(new_state, new_raises, root, device_root, state_index,
                        abstract_vectors, abstract_vector_index);
-        add_transition(state, new_state, vectors, vector_index, root, device_root, abstract_vectors,
+        add_transition(state, new_state, root, device_root, abstract_vectors,
                        abstract_vector_index);
 
 
@@ -132,10 +119,10 @@ int build(State *state, short raises, State *root, State *device_root, Vector *v
 }
 
 void
-build_post_turn(long cards, DataType bet, State *root, State *device_root, Vector *vectors, int *state_index,
-                int *vector_index, AbstractVector *abstract_vectors, int *abstract_vector_index) {
-    *root = {.terminal = NonTerminal,
-            .action = DealTurn,
+build_river(long cards, DataType bet, State *root, State *device_root, int *state_index,
+            AbstractVector *abstract_vectors, int *abstract_vector_index) {
+    *root = {.terminal = River,
+            .action = Call,
             .cards = cards,
             .sbbet = bet,
             .bbbet = bet,
@@ -144,10 +131,10 @@ build_post_turn(long cards, DataType bet, State *root, State *device_root, Vecto
             .card_strategies = {},
             .next_states =  {}};
     *state_index += 1;
-    int count = build(root, 0, root, device_root, vectors, state_index, vector_index, abstract_vectors,
+    int count = build(root, 0, root, device_root, state_index, abstract_vectors,
                       abstract_vector_index);
-    //printf("count: %d\n",count); // 270
-    //fflush(stdout);
+//    printf("count: %d\n",count); // 28
+//    fflush(stdout);
 }
 
 
@@ -155,14 +142,12 @@ extern "C" {
 Builder *init_builder() {
     Builder *builder = (Builder *) calloc(1, sizeof(Builder));
     builder->current_index = 0;
-    cudaMalloc(&builder->states, 63 * 49 * 270 * sizeof(State));
-    cudaMalloc(&builder->vectors, 63 * 49 * 26 * sizeof(Vector));
-    cudaMemset(builder->vectors, 0, 63 * 49 * 26 * sizeof(Vector));
-    cudaMalloc(&builder->abstract_vectors, 63 * 49 * 26 * 9 * sizeof(AbstractVector));
+    cudaMalloc(&builder->states, 63 * 49 * 9 * 28 * sizeof(State));
+    cudaMalloc(&builder->abstract_vectors, 63 * 49 * 9 * 26 * sizeof(AbstractVector));
     cudaMemset(builder->abstract_vectors, 0, 63 * 49 * 26 * 9 * sizeof(AbstractVector));
-    cudaMallocHost(&builder->communication, 63 * sizeof(Vector));
-    cudaMalloc(&builder->opponent_ranges, 63 * sizeof(Vector));
-    cudaMalloc(&builder->results, 63 * sizeof(Vector));
+    cudaMallocHost(&builder->communication, 63 * 49 * 9 * sizeof(Vector));
+    cudaMalloc(&builder->opponent_ranges, 63 * 49 * 9 * sizeof(Vector));
+    cudaMalloc(&builder->results, 63 * 49 * 9 * sizeof(Vector));
     printf("GPU builder created\n");
     fflush(stdout);
     return builder;
@@ -176,34 +161,30 @@ void download_c(Builder *builder, int index, DataType *vector) {
     memcpy(vector, builder->communication + index, 1326 * sizeof(DataType));
 }
 
-int build_turn_cuda(long cards, DataType bet, Builder *builder) {
+int build_river_cuda(long cards, DataType bet, Builder *builder) {
     cudaError_t err;
     int start = builder->current_index;
-    for (int c = 0; c < 52; c++) {
-        long turn = 1l << c;
-        if (cards & turn) continue;
-        long new_cards = cards | turn;
-        int vector_index = 0;
-        int abstract_vector_index = 0;
-        int state_index = 0;
-        int state_size = sizeof(State) * (27 * 9 + 27);
-        State *root = (State *) malloc(state_size);
+    int abstract_vector_index = 0;
+    int state_index = 0;
+    int state_size = sizeof(State) * (28);
+    State *root = (State *) malloc(state_size);
 
-        State *device_root = builder->states + builder->current_index * 270;
-        Vector *vectors = builder->vectors + builder->current_index * 26;
-        AbstractVector *abstract_vectors = builder->abstract_vectors + builder->current_index * 26 * 9;
-        builder->current_index += 1;
+    State *device_root = builder->states + builder->current_index * 28;
+    AbstractVector *abstract_vectors = builder->abstract_vectors + builder->current_index * 26;
+    builder->current_index += 1;
 
-        build_post_turn(new_cards, bet, root, device_root, vectors, &state_index, &vector_index, abstract_vectors,
-                        &abstract_vector_index);
-        cudaMemcpy(device_root, root, state_size, cudaMemcpyHostToDevice);
-        cudaDeviceSynchronize();
-        err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            printf("Build error: %s\n", cudaGetErrorString(err));
-            fflush(stdout);
-        }
+    build_river(cards, bet, root, device_root, &state_index, abstract_vectors,
+                &abstract_vector_index);
+    cudaMemcpy(device_root, root, state_size, cudaMemcpyHostToDevice);
+    cudaDeviceSynchronize();
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("Build error: %s\n", cudaGetErrorString(err));
+        fflush(stdout);
     }
-    return start / 49;
+//    printf("index: %d\n", start);
+//    printf("vector index: %d\n", abstract_vector_index);
+//    fflush(stdout);
+    return start;
 }
 }
