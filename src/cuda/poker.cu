@@ -18,10 +18,11 @@ __device__ void multiply(Vector *__restrict__ v1, Vector *__restrict__ v2, Vecto
 
 __device__ void divide(Vector *v1, DataType val) {
     int i = threadIdx.x;
+    val = 1.0f/val;
     for (int b = 0; b < ITERS; b++) {
         int index = i + TPB * b;
         if (index < 1326) {
-            v1->values[index] /= val;
+            v1->values[index] *= val;
         }
     }
 }
@@ -171,20 +172,18 @@ __device__ void get_strategy(State *state, Vector *scratch, Vector *result) {
 }
 
 __device__ void
-get_strategy_abstract(State *state, Vector *scratch, Vector *result, long communal_cards, Evaluator *evaluator) {
+get_strategy_abstract(State *state, Vector *scratch, Vector *result, short *abstractions) {
     int tid = threadIdx.x;
-    long turn_river = communal_cards ^ evaluator->flop;
-    long eval_index = get_index(turn_river);
-    short *abstractions = evaluator->abstractions + eval_index * 1326;
     Vector *sum = scratch;
     int transitions = state->transitions;
-    DataType vals[2] = {0.0f,0.0f};
+    DataType vals[2] = {0.0f, 0.0f};
+#pragma unroll 3
     for (int k = 0; k < transitions; k++) {
         vals[0] += state->card_strategies[k]->values[tid];
-        vals[1] += state->card_strategies[k]->values[tid+128];
+        vals[1] += state->card_strategies[k]->values[tid + 128];
     }
     sum->values[tid] = vals[0];
-    sum->values[tid+128] = vals[1];
+    sum->values[tid + 128] = vals[1];
     __syncthreads();
     for (int b = 0; b < ITERS; b++) {
         int index = tid + TPB * b;
@@ -216,12 +215,9 @@ __device__ void update_strategy(State *__restrict__ state, Vector *__restrict__ 
     }
 }
 
-__device__ void update_strategy_abstract(State *__restrict__ state, Vector *__restrict__ update, long communal_cards,
-                                         Evaluator *evaluator) {
+__device__ void update_strategy_abstract(State *__restrict__ state, Vector *__restrict__ update,
+                                         short *abstractions) {
     int tid = threadIdx.x;
-    long turn_river = communal_cards ^ evaluator->flop;
-    long eval_index = get_index(turn_river);
-    short *abstractions = evaluator->abstractions + eval_index * 1326;
     __syncthreads();
     for (int b = 0; b < ITERS; b++) {
         int index = tid + TPB * b;
@@ -235,7 +231,7 @@ __device__ void update_strategy_abstract(State *__restrict__ state, Vector *__re
     __syncthreads();
     for (int k = 0; k < state->transitions; k++) {
         state->card_strategies[k]->values[tid] = max(state->card_strategies[k]->values[tid], 0.0f);
-        state->card_strategies[k]->values[tid+128] = max(state->card_strategies[k]->values[tid+128], 0.0f);
+        state->card_strategies[k]->values[tid + 128] = max(state->card_strategies[k]->values[tid + 128], 0.0f);
     }
     __syncthreads();
 }
@@ -416,7 +412,7 @@ __device__ void remove_collisions(Vector *vector, long cards) {
 }
 
 __device__ void handle_node(Vector *scratch, Context *contexts, short updating_player, bool calc_exploit, int *depth,
-                            long communal_cards, Evaluator *evaluator) {
+                            long communal_cards, short *abstractions) {
     int tid = threadIdx.x;
     Context *context = &contexts[*depth];
     State *state = context->state;
@@ -442,7 +438,7 @@ __device__ void handle_node(Vector *scratch, Context *contexts, short updating_p
         if (__popcll(communal_cards) < 5) {
             get_strategy(state, scratch, action_probs);
         } else {
-            get_strategy_abstract(state, scratch, action_probs, communal_cards, evaluator);
+            get_strategy_abstract(state, scratch, action_probs, abstractions);
         }
     } else {
         int i = context->transition - 1;
@@ -474,7 +470,7 @@ __device__ void handle_node(Vector *scratch, Context *contexts, short updating_p
             if (__popcll(communal_cards) < 5) {
                 update_strategy(state, results);
             } else {
-                update_strategy_abstract(state, results, communal_cards, evaluator);
+                update_strategy_abstract(state, results, abstractions);
             }
         }
         (*depth)--;
@@ -505,7 +501,17 @@ __device__ void evaluate_river(Vector *opponent_range_root,
                                Player updating_player,
                                bool calc_exploit,
                                Vector *scratch_root,
-                               DataType *temp) {
+                               DataType *temp,
+                               short *abstractions) {
+    int tid = threadIdx.x;
+    __shared__ short local_abstractions[1326];
+    for (int b = 0; b < ITERS; b++) {
+        int index = tid + 128 * b;
+        if (index < 1326) {
+            local_abstractions[index] = abstractions[index];
+        }
+    }
+    __syncthreads();
     Context contexts[7];
     contexts[0] = {root_state, opponent_range_root, 0};
     int depth = 0;
@@ -535,7 +541,8 @@ __device__ void evaluate_river(Vector *opponent_range_root,
                 depth--;
                 break;
             case NonTerminal : {
-                handle_node(scratch, contexts, updating_player, calc_exploit, &depth, communal_cards, evaluator);
+                handle_node(scratch, contexts, updating_player, calc_exploit, &depth, communal_cards,
+                            local_abstractions);
                 break;
             }
         }
@@ -575,7 +582,7 @@ __device__ void evaluate_turn(Vector *opponent_range_root,
                 depth--;
                 break;
             case NonTerminal : {
-                handle_node(scratch, contexts, updating_player, calc_exploit, &depth, state->cards, evaluator);
+                handle_node(scratch, contexts, updating_player, calc_exploit, &depth, state->cards, nullptr);
                 break;
             }
             case River:
@@ -596,7 +603,8 @@ __device__ void evaluate_turn(Vector *opponent_range_root,
                     evaluate_river(new_range, next, evaluator, state->cards | river, evaluator->card_indexes, eval,
                                    coll_vec,
                                    updating_player,
-                                   calc_exploit, scratch_root + (depth + 1) * 10, temp);
+                                   calc_exploit, scratch_root + (depth + 1) * 10, temp,
+                                   evaluator->abstractions + eval_index * 1326);
                     remove_collisions(result + 10, river);
                     add_assign(result, result + 10);
                 }
@@ -609,19 +617,20 @@ __device__ void evaluate_turn(Vector *opponent_range_root,
     remove_collisions(scratch_root, root_state->cards);
 }
 
-__global__ void evaluate_all(Vector* root_scratch, Vector *opponent_ranges, State* root_states, Evaluator *evaluator, Player updating_player, bool calc_exploit) {
+__global__ void evaluate_all(Vector *root_scratch, Vector *opponent_ranges, State *root_states, Evaluator *evaluator,
+                             Player updating_player, bool calc_exploit) {
     int block = blockIdx.x;
-    Vector* scratch = root_scratch + 10 * 14 * block;
-    Vector* opponent_range = opponent_ranges + block / 49;
-    State* states = root_states + 270 * block;
+    Vector *scratch = root_scratch + 10 * 14 * block;
+    Vector *opponent_range = opponent_ranges + block / 49;
+    State *states = root_states + 270 * block;
     evaluate_turn(opponent_range, states, evaluator, updating_player, calc_exploit, scratch);
 }
 
-__global__ void aggregate(Vector *root_scratch, Vector* root_result) {
+__global__ void aggregate(Vector *root_scratch, Vector *root_result) {
     int i = threadIdx.x;
     int block = blockIdx.x;
-    Vector* scratch = root_scratch + block * 10 * 14 * 49;
-    Vector* result = root_result + block;
+    Vector *scratch = root_scratch + block * 10 * 14 * 49;
+    Vector *result = root_result + block;
     for (int i = 1; i < 49; i++) {
         add_assign(result, scratch + 10 * 14 * i);
     }
@@ -650,22 +659,23 @@ void evaluate_cuda(Builder *builder,
     size_t scratch_size = sizeof(Vector) * 10 * 14 * 49 * 63;
     cudaMalloc(&device_scratch, scratch_size);
     cudaMemset(device_scratch, 0, scratch_size);
-    cudaMemcpy(builder->opponent_ranges, builder->communication, 63 * sizeof (Vector), cudaMemcpyHostToDevice);
-    cudaMemset(builder->results, 0, 63 * sizeof (Vector));
+    cudaMemcpy(builder->opponent_ranges, builder->communication, 63 * sizeof(Vector), cudaMemcpyHostToDevice);
+    cudaMemset(builder->results, 0, 63 * sizeof(Vector));
     err = cudaGetLastError();
     if (err != cudaSuccess) {
         printf("Setup error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
     }
-    evaluate_all<<<49*63, 128>>>(device_scratch, builder->opponent_ranges, builder->states, evaluator, updating_player == 0 ? Small : Big, calc_exploit);
+    evaluate_all<<<49 * 63, 128>>>(device_scratch, builder->opponent_ranges, builder->states, evaluator,
+                                   updating_player == 0 ? Small : Big, calc_exploit);
     cudaDeviceSynchronize();
     err = cudaGetLastError();
     if (err != cudaSuccess) {
         printf("Main execution error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
     }
-    aggregate<<<63,128>>>(device_scratch, builder->results);
-    cudaMemcpy(builder->communication, builder->results, 63*sizeof (Vector), cudaMemcpyDeviceToHost);
+    aggregate<<<63, 128>>>(device_scratch, builder->results);
+    cudaMemcpy(builder->communication, builder->results, 63 * sizeof(Vector), cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
     err = cudaGetLastError();
     if (err != cudaSuccess) {
