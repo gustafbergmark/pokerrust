@@ -49,14 +49,9 @@ struct __align__(32) State {
     DataType bbbet;
     Player next_to_act;
     short transitions;
-    Vector *card_strategies[48];
-    State *next_states[48];
-};
-
-struct Context {
-    State *state;
-    Vector *opponent_range;
-    int transition;
+    Vector *card_strategies[3];
+    State *next_states[3];
+    State *parent;
 };
 
 struct Builder {

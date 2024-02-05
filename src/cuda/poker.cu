@@ -18,7 +18,7 @@ __device__ void multiply(Vector *__restrict__ v1, Vector *__restrict__ v2, Vecto
 
 __device__ void divide(Vector *v1, DataType val) {
     int i = threadIdx.x;
-    val = 1.0f/val;
+    val = 1.0f / val;
     for (int b = 0; b < ITERS; b++) {
         int index = i + TPB * b;
         if (index < 1326) {
@@ -287,6 +287,7 @@ evaluate_showdown(DataType *opponent_range, short *eval,
                   short *coll_vec, DataType bet, Vector *scratch,
                   DataType *temp) {
     __syncthreads();
+    return;
     DataType *result = (DataType *) scratch;
     DataType *sorted_range = (DataType *) (scratch + 1);
     DataType *sorted_eval = (DataType *) (scratch + 2);
@@ -356,6 +357,7 @@ __device__ void
 evaluate_fold(Vector *opponent_range, short *card_indexes, DataType bet, Vector *result,
               DataType *temp) {
     __syncthreads();
+    return;
     // Setup
     int i = threadIdx.x;
     copy(opponent_range, result);
@@ -411,20 +413,19 @@ __device__ void remove_collisions(Vector *vector, long cards) {
     __syncthreads();
 }
 
-__device__ void handle_node(Vector *scratch, Context *contexts, short updating_player, bool calc_exploit, int *depth,
-                            long communal_cards, short *abstractions) {
+__device__ void
+handle_node(Vector *scratch, State **state_ptr, int *transition_count, short updating_player, bool calc_exploit,
+            int *depth,
+            long communal_cards, short *abstractions) {
     int tid = threadIdx.x;
-    Context *context = &contexts[*depth];
-    State *state = context->state;
+    State *state = *state_ptr;
     int transitions = state->transitions;
-    Vector *opponent_range = context->opponent_range;
     Vector *average_strategy = scratch;
-    scratch += 1;
-    Vector *action_probs = scratch;
-    scratch += transitions; // + transitions
-    Vector *results = scratch;
-    scratch += transitions; // + state-> transitions
-    if (context->transition == 0) {
+    Vector *opponent_range = scratch + 1;
+    Vector *action_probs = scratch + 2;
+    Vector *results = scratch + 2 + transitions;
+    int transition = (*transition_count >> (2 * *depth)) & 3;
+    if (transition == 0) {
         if ((updating_player == state->next_to_act) && calc_exploit) {
             for (int b = 0; b < ITERS; b++) {
                 int index = tid + TPB * b;
@@ -441,7 +442,7 @@ __device__ void handle_node(Vector *scratch, Context *contexts, short updating_p
             get_strategy_abstract(state, scratch, action_probs, abstractions);
         }
     } else {
-        int i = context->transition - 1;
+        int i = transition - 1;
         Vector *new_result = average_strategy + 10;
         copy(new_result, results + i);
         if (updating_player == state->next_to_act) {
@@ -461,7 +462,7 @@ __device__ void handle_node(Vector *scratch, Context *contexts, short updating_p
         }
     }
 
-    if (context->transition == transitions) {
+    if (transition == transitions) {
         if ((state->next_to_act == updating_player) && !calc_exploit) {
             for (int i = 0; i < transitions; i++) {
                 Vector *util = results + i;
@@ -473,20 +474,21 @@ __device__ void handle_node(Vector *scratch, Context *contexts, short updating_p
                 update_strategy_abstract(state, results, abstractions);
             }
         }
+        *state_ptr = state->parent;
         (*depth)--;
     } else {
-        int i = context->transition;
-        State *next = context->state->next_states[i];
-        Vector *new_range;
+        int i = transition;
+        State *next = state->next_states[i];
+        Vector *new_range = opponent_range + 10;
         if (state->next_to_act == updating_player) {
-            new_range = opponent_range;
+            copy(opponent_range, new_range);
         } else {
-            new_range = scratch;
-            scratch += 1; // + 1
             multiply(opponent_range, action_probs + i, new_range);
         }
-        contexts[*depth + 1] = {next, new_range, 0};
-        context->transition++;
+        *state_ptr = next;
+        // Reset transition count for depth + 1
+        *transition_count &= ~(3 << ((*depth + 1)*2));
+        *transition_count += 1 << (*depth * 2);
         (*depth)++;
     }
 }
@@ -512,36 +514,40 @@ __device__ void evaluate_river(Vector *opponent_range_root,
         }
     }
     __syncthreads();
-    Context contexts[7];
-    contexts[0] = {root_state, opponent_range_root, 0};
+    State *state = root_state;
+    // Every 2 bits signifies the transition count at a specific depth
+    int transitions = 0;
+    // Scratch + 1 is position of opponent range at each level
+    copy(opponent_range_root, scratch_root + 1);
+
     int depth = 0;
     while (depth >= 0) {
         Vector *scratch = scratch_root + depth * 10;
-        Context *context = &contexts[depth];
-        State *state = context->state;
-        Vector *opponent_range = context->opponent_range;
-
+        Vector *opponent_range = scratch + 1;
         switch (state->terminal) {
             case Showdown :
                 evaluate_showdown(opponent_range->values, eval,
                                   coll_vec, state->sbbet, scratch,
                                   temp);
+                state = state->parent;
                 depth--;
                 break;
             case SBWins :
                 evaluate_fold(opponent_range,
                               card_indexes, updating_player == 1 ? -state->bbbet : state->bbbet, scratch,
                               temp);
+                state = state->parent;
                 depth--;
                 break;
             case BBWins :
                 evaluate_fold(opponent_range,
                               card_indexes,
                               updating_player == 0 ? -state->sbbet : state->sbbet, scratch, temp);
+                state = state->parent;
                 depth--;
                 break;
             case NonTerminal : {
-                handle_node(scratch, contexts, updating_player, calc_exploit, &depth, communal_cards,
+                handle_node(scratch, &state, &transitions, updating_player, calc_exploit, &depth, communal_cards,
                             local_abstractions);
                 break;
             }
@@ -558,42 +564,45 @@ __device__ void evaluate_turn(Vector *opponent_range_root,
     __shared__ DataType temp[128];
     // Remove possibility of impossible hands
     remove_collisions(opponent_range_root, root_state->cards);
-    Context contexts[7];
-    contexts[0] = {root_state, opponent_range_root, 0};
+    State *state = root_state;
+    // Every 2 bits signifies the transition count at a specific depth
+    int transitions = 0;
+    // Scratch + 1 is position of opponent range at each level
+    copy(opponent_range_root, scratch_root + 1);
     int depth = 0;
 
     while (depth >= 0) {
         Vector *scratch = scratch_root + depth * 10;
-        Context *context = &contexts[depth];
-        State *state = context->state;
-        Vector *opponent_range = context->opponent_range;
+        Vector *opponent_range = scratch + 1;
 
         switch (state->terminal) {
             case SBWins :
                 evaluate_fold(opponent_range,
                               evaluator->card_indexes, updating_player == 1 ? -state->bbbet : state->bbbet, scratch,
                               temp);
+                state = state->parent;
                 depth--;
                 break;
             case BBWins :
                 evaluate_fold(opponent_range,
                               evaluator->card_indexes,
                               updating_player == 0 ? -state->sbbet : state->sbbet, scratch, temp);
+                state = state->parent;
                 depth--;
                 break;
             case NonTerminal : {
-                handle_node(scratch, contexts, updating_player, calc_exploit, &depth, state->cards, nullptr);
+                handle_node(scratch, &state, &transitions, updating_player, calc_exploit, &depth, state->cards,
+                            nullptr);
                 break;
             }
             case River:
                 Vector *result = scratch;
-                scratch += 1;
                 zero(result);
                 State *next = state->next_states[0];
                 for (int c = 0; c < 52; c++) {
                     long river = 1l << c;
                     if (river & state->cards) continue;
-                    Vector *new_range = scratch;
+                    Vector *new_range = scratch + 10 + 1;
                     copy(opponent_range, new_range);
                     remove_collisions(new_range, river);
                     long set = (state->cards | river) ^ evaluator->flop;
@@ -609,6 +618,7 @@ __device__ void evaluate_turn(Vector *opponent_range_root,
                     add_assign(result, result + 10);
                 }
                 divide(result, 48.0f);
+                state = state->parent;
                 depth--;
                 break;
         }

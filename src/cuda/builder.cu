@@ -104,6 +104,7 @@ add_transition(State *parent, State *child, Vector *vectors, int *vector_index, 
     }
     // Update pointers to work on gpu;
     parent->next_states[parent->transitions] = device_root + (child - root);
+    child->parent = device_root + (parent - root);
     parent->transitions += 1;
 }
 
