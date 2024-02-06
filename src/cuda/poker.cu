@@ -151,6 +151,14 @@ __device__ DataType reduce_sum(DataType *vector) {
     return temp[0];
 }
 
+__device__ DataType get_strategy_sum(State *state) {
+    DataType sum = 0.0f;
+    for (int k = 0; k < state->transitions; k++) {
+        sum += state->card_strategies[k]->values[threadIdx.x];
+    }
+    return sum;
+}
+
 __device__ void
 get_strategy_abstract(State *state, Vector *scratch, Vector *result, short *abstractions) {
     int tid = threadIdx.x;
@@ -321,47 +329,47 @@ evaluate_showdown(DataType *opponent_range, short *eval,
 
 
 __device__ void
-evaluate_fold(Vector *opponent_range, short *card_indexes, DataType bet, Vector *result) {
-    __syncthreads();
-    return;
-    __shared__ DataType temp[128];
+evaluate_fold(Vector *opponent_range, DataType opponent_reach, short *card_indexes, DataType bet, Vector *result, short *abstractions) {
+    __shared__ DataType reach_probs[TPB];
+    __shared__ DataType card_collisions[52];
     // Setup
-    int i = threadIdx.x;
-    copy(opponent_range, result);
+    int tid = threadIdx.x;
+    reach_probs[tid] = opponent_reach;
+    __syncthreads();
+    for(int b = 0; b < ITERS; b++) {
+        int index = tid + b * TPB;
+        if(index < 1326) {
+            DataType prob =  opponent_range->values[index] * reach_probs[abstractions[index]];
+            result->values[index] = prob;
+        }
+    }
 
-
-    DataType total = reduce_sum(opponent_range->values);
+    DataType total = reduce_sum(result->values);
 
     __syncthreads();
-    temp[i] = 0;
+    reach_probs[tid] = 0;
     DataType card_sum = 0.0f;
-    if (i < 52) {
-        for (int c = 0; c < 26; c++) {
-            short index = card_indexes[i * 51 + c];
-            card_sum += opponent_range->values[index];
+    if (tid < 52) {
+        for (int c = 0; c < 51; c++) {
+            short index = card_indexes[tid * 51 + c];
+            card_sum += result->values[index];
         }
-        atomicAdd(&temp[i], card_sum);
-    } else if ((i >= 64) && (i < (64 + 52))) {
-        for (int c = 26; c < 51; c++) {
-            short index = card_indexes[(i - 64) * 51 + c];
-            card_sum += opponent_range->values[index];
-        }
-        atomicAdd(&temp[i - 64], card_sum);
+        reach_probs[tid] += card_sum;
     }
     __syncthreads();
     for (int b = 0; b < ITERS; b++) {
-        int index = i + TPB * b;
+        int index = tid + TPB * b;
         if (index < 1326) {
             long cards = from_index(index);
             int card1 = __ffsll(cards) - 1;
             cards -= 1l << card1;
             int card2 = __ffsll(cards) - 1;
-            result->values[index] -= temp[card1] + temp[card2];
+            result->values[index] -= reach_probs[card1] + reach_probs[card2];
         }
     }
     __syncthreads();
     for (int b = 0; b < ITERS; b++) {
-        int index = i + TPB * b;
+        int index = tid + TPB * b;
         if (index < 1326) {
             result->values[index] += total;
             result->values[index] *= bet;
@@ -394,9 +402,15 @@ __device__ void evaluate_river(Vector *opponent_range,
     State *state = root_state;
     int tid = threadIdx.x;
     // Every 2 bits signifies the transition count at a specific depth
-    int transitions = 0;
+    int transition_state = 0;
     int depth = 0;
+    DataType opponent_reach[7] = {1.0f};
+    DataType player_reach[7] = {1.0f};
+    DataType strat_sums[7];
+    DataType average_abstract[7];
+    int count = 0;
     while (depth >= 0) {
+        count++;
         switch (state->terminal) {
             case Showdown :
                 evaluate_showdown(opponent_range->values, eval,
@@ -405,22 +419,22 @@ __device__ void evaluate_river(Vector *opponent_range,
                 depth--;
                 break;
             case SBWins :
-                evaluate_fold(opponent_range,
-                              card_indexes, updating_player == 1 ? -state->bbbet : state->bbbet, scratch);
+                evaluate_fold(opponent_range, opponent_reach[depth],
+                              card_indexes, updating_player == 1 ? -state->bbbet : state->bbbet, scratch, abstractions);
                 state = state->parent;
                 depth--;
                 break;
             case BBWins :
-                evaluate_fold(opponent_range,
+                evaluate_fold(opponent_range,opponent_reach[depth],
                               card_indexes,
-                              updating_player == 0 ? -state->sbbet : state->sbbet, scratch);
+                              updating_player == 0 ? -state->sbbet : state->sbbet, scratch, abstractions);
                 state = state->parent;
                 depth--;
                 break;
             case NonTerminal : {
                 int transitions = state->transitions;
                 Vector *average_strategy = scratch + depth;
-                int transition = (transitions >> (2 * depth)) & 3;
+                int transition = (transition_state >> (2 * depth)) & 3;
                 if (transition == 0) {
                     if ((updating_player == state->next_to_act) && calc_exploit) {
                         for (int b = 0; b < ITERS; b++) {
@@ -432,11 +446,19 @@ __device__ void evaluate_river(Vector *opponent_range,
                     } else {
                         zero(average_strategy);
                     }
+                    strat_sums[depth] = get_strategy_sum(state);
+                    average_abstract[depth] = 0.0f;
                 } else {
                     Vector *new_result = average_strategy + 1;
                     if (updating_player == state->next_to_act) {
                         if (!calc_exploit) {
-                            //fma(results + i, action_probs + i, average_strategy); // TODO! fix this
+                            // Should work if we multiply by updating players reach prob at leaf nodes
+                            add_assign(average_strategy, new_result);
+                            DataType regret = state->card_strategies[transition-1]->values[tid];
+                            average_abstract[depth] += average_abstract[depth+1] * regret / strat_sums[depth];
+                            // We add the util to the regrets here, as it won't be read again this iteration, and we don't
+                            // have to store the utility til later.
+                            state->card_strategies[transition-1]->values[tid] = regret + average_abstract[depth+1];
                         } else {
                             for (int b = 0; b < ITERS; b++) {
                                 int index = tid + TPB * b;
@@ -453,22 +475,38 @@ __device__ void evaluate_river(Vector *opponent_range,
 
                 if (transition == transitions) {
                     if ((state->next_to_act == updating_player) && !calc_exploit) {
-                        // update strategy TODO
+                        // update strategy and remove the utility of the average strategy
+                        for(int k = 0; k < state->transitions; k++) {
+                            DataType regret = state->card_strategies[k]->values[tid];
+                            regret -= average_abstract[depth];
+                            regret = max(regret, 0.0f);
+                            state->card_strategies[k]->values[tid] = regret;
+                        }
                     }
                     state = state->parent;
                     depth--;
                 } else {
                     State *next = state->next_states[transition];
-                    // update action prob TODO
+                    // Update reach probabilities of ranges
+                    if(state->next_to_act == updating_player) {
+                        player_reach[depth + 1] = player_reach[depth] * state->card_strategies[transition]->values[tid] / strat_sums[depth];
+                        opponent_reach[depth + 1] = opponent_reach[depth];
+                    } else {
+                        opponent_reach[depth + 1] = opponent_reach[depth] * state->card_strategies[transition]->values[tid] / strat_sums[depth];
+                        player_reach[depth + 1] = player_reach[depth];
+                    }
                     state = next;
                     // Reset transition count for depth + 1
-                    transitions &= ~(3 << ((depth + 1) * 2));
-                    transitions += 1 << (depth * 2);
+                    transition_state &= ~(3 << ((depth + 1) * 2));
+                    transition_state += 1 << (depth * 2);
                     depth++;
                 }
                 break;
             }
         }
+    }
+    if(tid == 0) {
+        //printf("count: %d\n", count);
     }
 }
 
@@ -518,7 +556,7 @@ void evaluate_cuda(Builder *builder,
         printf("Setup error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
     }
-    evaluate_all<<< 63 * 49 * 9, 128>>>(builder->opponent_ranges, builder->results, builder->states, evaluator,
+    evaluate_all<<< 63 * 49 * 9, TPB>>>(builder->opponent_ranges, builder->results, builder->states, evaluator,
                                         updating_player == 0 ? Small : Big, calc_exploit, device_scratch);
     cudaDeviceSynchronize();
     err = cudaGetLastError();
