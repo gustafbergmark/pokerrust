@@ -6,8 +6,8 @@
 #define POKERRUST_STRUCTS_H
 
 #define DataType float
-#define TPB 128
-#define ITERS 11
+#define TPB 256
+#define ITERS 6
 #define ABSTRACTIONS 256
 
 enum TerminalState {

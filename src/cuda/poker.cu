@@ -106,13 +106,14 @@ __device__ void p_sum(DataType *input, int i) {
     __syncthreads();
 }
 
-__device__ void cuda_prefix_sum(DataType *input, DataType *temp) {
+__device__ void cuda_prefix_sum(DataType *input) {
     __syncthreads();
+    __shared__ DataType temp[TPB];
     int i = threadIdx.x;
     temp[i] = 0;
     for (int b = 0; b < ITERS; b++) {
         int index = i * ITERS + b;
-        if (index < 1326 && i < 127) {
+        if (index < 1326 && i < TPB - 1) {
             temp[i] += input[index];
         }
     }
@@ -130,8 +131,9 @@ __device__ void cuda_prefix_sum(DataType *input, DataType *temp) {
     __syncthreads();
 }
 
-__device__ DataType reduce_sum(DataType *vector, DataType *temp) {
+__device__ DataType reduce_sum(DataType *vector) {
     int i = threadIdx.x;
+    __shared__ DataType temp[TPB];
     temp[i] = 0;
     for (int b = 0; b < ITERS; b++) {
         int index = i + TPB * b;
@@ -140,7 +142,7 @@ __device__ DataType reduce_sum(DataType *vector, DataType *temp) {
         }
     }
     __syncthreads();
-    for (int k = 64; k > 0; k >>= 1) {
+    for (int k = TPB / 2; k > 0; k >>= 1) {
         if (i < k) {
             temp[i] += temp[i + k];
         }
@@ -252,7 +254,6 @@ evaluate_showdown(DataType *opponent_range, short *eval,
                   short *coll_vec, DataType bet, Vector *scratch) {
     __syncthreads();
     return;
-    __shared__ DataType temp[128];
 
     DataType *result = (DataType *) scratch;
     DataType *sorted_range = (DataType *) (scratch + 1);
@@ -278,7 +279,7 @@ evaluate_showdown(DataType *opponent_range, short *eval,
     handle_collisions(coll_vec, sorted_range, sorted_eval);
 
     // Calculate prefix sum
-    cuda_prefix_sum(sorted_range, temp);
+    cuda_prefix_sum(sorted_range);
     if (i == 0) {
         sorted_range[1326] = sorted_range[1325] + opponent_range[eval[1325] & 2047];
     }
@@ -329,7 +330,7 @@ evaluate_fold(Vector *opponent_range, short *card_indexes, DataType bet, Vector 
     copy(opponent_range, result);
 
 
-    DataType total = reduce_sum(opponent_range->values, temp);
+    DataType total = reduce_sum(opponent_range->values);
 
     __syncthreads();
     temp[i] = 0;
@@ -379,62 +380,6 @@ __device__ void remove_collisions(Vector *vector, long cards) {
     __syncthreads();
 }
 
-__device__ void
-handle_node(Vector *scratch, State **state_ptr, int *transition_count, short updating_player, bool calc_exploit,
-            int *depth,
-            long communal_cards, short *abstractions) {
-    int tid = threadIdx.x;
-    State *state = *state_ptr;
-    int transitions = state->transitions;
-    Vector *average_strategy = scratch;
-    int transition = (*transition_count >> (2 * *depth)) & 3;
-    if (transition == 0) {
-        if ((updating_player == state->next_to_act) && calc_exploit) {
-            for (int b = 0; b < ITERS; b++) {
-                int index = tid + TPB * b;
-                if (index < 1326) {
-                    average_strategy->values[index] = -INFINITY;
-                }
-            }
-        } else {
-            zero(average_strategy);
-        }
-    } else {
-        Vector *new_result = average_strategy + 1;
-        if (updating_player == state->next_to_act) {
-            if (!calc_exploit) {
-                //fma(results + i, action_probs + i, average_strategy); // TODO! fix this
-            } else {
-                for (int b = 0; b < ITERS; b++) {
-                    int index = tid + TPB * b;
-                    if (index < 1326) {
-                        average_strategy->values[index] = max(average_strategy->values[index],
-                                                              new_result->values[index]);
-                    }
-                }
-            }
-        } else {
-            add_assign(average_strategy, new_result);
-        }
-    }
-
-    if (transition == transitions) {
-        if ((state->next_to_act == updating_player) && !calc_exploit) {
-            // update strategy TODO
-        }
-        *state_ptr = state->parent;
-        (*depth)--;
-    } else {
-        State *next = state->next_states[transition];
-        // update action prob TODO
-        *state_ptr = next;
-        // Reset transition count for depth + 1
-        *transition_count &= ~(3 << ((*depth + 1) * 2));
-        *transition_count += 1 << (*depth * 2);
-        (*depth)++;
-    }
-}
-
 __device__ void evaluate_river(Vector *opponent_range,
                                State *root_state,
                                Vector *scratch,
@@ -447,6 +392,7 @@ __device__ void evaluate_river(Vector *opponent_range,
                                bool calc_exploit) {
     __syncthreads();
     State *state = root_state;
+    int tid = threadIdx.x;
     // Every 2 bits signifies the transition count at a specific depth
     int transitions = 0;
     int depth = 0;
@@ -472,8 +418,54 @@ __device__ void evaluate_river(Vector *opponent_range,
                 depth--;
                 break;
             case NonTerminal : {
-                handle_node(scratch, &state, &transitions, updating_player, calc_exploit, &depth, communal_cards,
-                            abstractions);
+                int transitions = state->transitions;
+                Vector *average_strategy = scratch + depth;
+                int transition = (transitions >> (2 * depth)) & 3;
+                if (transition == 0) {
+                    if ((updating_player == state->next_to_act) && calc_exploit) {
+                        for (int b = 0; b < ITERS; b++) {
+                            int index = tid + TPB * b;
+                            if (index < 1326) {
+                                average_strategy->values[index] = -INFINITY;
+                            }
+                        }
+                    } else {
+                        zero(average_strategy);
+                    }
+                } else {
+                    Vector *new_result = average_strategy + 1;
+                    if (updating_player == state->next_to_act) {
+                        if (!calc_exploit) {
+                            //fma(results + i, action_probs + i, average_strategy); // TODO! fix this
+                        } else {
+                            for (int b = 0; b < ITERS; b++) {
+                                int index = tid + TPB * b;
+                                if (index < 1326) {
+                                    average_strategy->values[index] = max(average_strategy->values[index],
+                                                                          new_result->values[index]);
+                                }
+                            }
+                        }
+                    } else {
+                        add_assign(average_strategy, new_result);
+                    }
+                }
+
+                if (transition == transitions) {
+                    if ((state->next_to_act == updating_player) && !calc_exploit) {
+                        // update strategy TODO
+                    }
+                    state = state->parent;
+                    depth--;
+                } else {
+                    State *next = state->next_states[transition];
+                    // update action prob TODO
+                    state = next;
+                    // Reset transition count for depth + 1
+                    transitions &= ~(3 << ((depth + 1) * 2));
+                    transitions += 1 << (depth * 2);
+                    depth++;
+                }
                 break;
             }
         }
