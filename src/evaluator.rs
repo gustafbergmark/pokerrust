@@ -6,8 +6,8 @@ use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct Evaluator<const M: usize> {
-    // First 1326 are card orders, following 128 is start group indexes
-    // for each gpu thread and last 128 is end next group index for each gpu thread
+    // First 1326 are card orders, following 256 is start group indexes
+    // for each gpu thread and last 256 is end next group index for each gpu thread
     card_order: Vec<u64>,
     card_indexes: Vec<u16>,
     vectorized_eval: CombinationMap<Vec<u16>, 52, 5>,
@@ -60,7 +60,7 @@ impl<const M: usize> Evaluator<M> {
                         .map(|hand| {
                             let hand = box_cards!(hand, fixed_flop); // Fixed Flop
                             let num_hand = Self::cards_to_u64_inner(&hand, &card_nums);
-                            let mut result: Vec<u16> = vec![0; 1326 + 128 * 2];
+                            let mut result: Vec<u16> = vec![0; 1326 + 256 * 2];
                             let mut coll_vec = vec![0; 52 * 51];
                             let mut evals = vec![];
                             for (i, &cards) in card_order.iter().enumerate() {
@@ -87,8 +87,8 @@ impl<const M: usize> Evaluator<M> {
                                     // 2048 bit set indicates start of new group
                                     index |= 2048;
                                 }
-                                if sorted_index % 11 == 0 {
-                                    result[1326 + sorted_index / 11] = last_group as u16;
+                                if sorted_index % 6 == 0 {
+                                    result[1326 + sorted_index / 6] = last_group as u16;
                                 }
                                 result[sorted_index] = index as u16;
                             }
@@ -101,8 +101,8 @@ impl<const M: usize> Evaluator<M> {
                                     prev_eval = eval;
                                     next_group = sorted_index + 1;
                                 }
-                                if (sorted_index % 11 == 10) || (sorted_index == 1325) {
-                                    result[1326 + 128 + sorted_index / 11] = next_group as u16;
+                                if (sorted_index % 6 == 10) || (sorted_index == 1325) {
+                                    result[1326 + 256 + sorted_index / 6] = next_group as u16;
                                 }
                             }
                             // Calculate collisions for GPU

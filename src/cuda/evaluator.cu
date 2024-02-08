@@ -44,7 +44,7 @@ Evaluator *transfer_flop_eval_cuda(long flop, long *card_order, short *card_inde
     cudaMemcpy(&device_eval->flop, &flop, sizeof(long), cudaMemcpyHostToDevice);
     cudaMemcpy(&device_eval->card_order, card_order, 1326 * sizeof(long), cudaMemcpyHostToDevice);
     cudaMemcpy(&device_eval->card_indexes, card_indexes, 52 * 51 * sizeof(short), cudaMemcpyHostToDevice);
-    cudaMemcpy(&device_eval->eval, eval, 1326 * (1326 + 128 * 2) * sizeof(short), cudaMemcpyHostToDevice);
+    cudaMemcpy(&device_eval->eval, eval, 1326 * (1326 + 256 * 2) * sizeof(short), cudaMemcpyHostToDevice);
     cudaMemcpy(&device_eval->coll_vec, coll_vec, 1326 * 52 * 51 * sizeof(short), cudaMemcpyHostToDevice);
     cudaMemcpy(&device_eval->abstractions, abstractions, 1326 * 1326 * sizeof(short), cudaMemcpyHostToDevice);
 

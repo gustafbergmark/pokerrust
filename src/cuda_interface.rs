@@ -55,7 +55,7 @@ pub fn transfer_flop_eval<const M: usize>(
     let mut cards = 3;
     for _ in 0..1326 {
         if (communal_cards & cards) > 0 {
-            let mut e = vec![0; 1326 + 128 * 2];
+            let mut e = vec![0; 1326 + 256 * 2];
             evals.append(&mut e);
             let mut c = vec![0; 52 * 51];
             collisions.append(&mut c);
@@ -73,17 +73,8 @@ pub fn transfer_flop_eval<const M: usize>(
 
         cards = CombinationMap::<(), 52, 2>::next(cards);
     }
-    // for cards in eval.card_order() {
-    //     if *cards & communal_cards > 0 {
-    //         continue;
-    //     }
-    //     let index = CombinationMap::<(), 52, 2>::get_ordering_index(*cards);
-    //     assert_eq!(
-    //         eval.vectorized_eval(cards | communal_cards)[..],
-    //         evals[index * (1326 + 128 * 2)..(index + 1) * (1326 + 128 * 2)]
-    //     )
-    // }
-    assert_eq!(evals.len(), 1326 * (1326 + 128 * 2));
+
+    assert_eq!(evals.len(), 1326 * (1326 + 256 * 2));
     assert_eq!(collisions.len(), 1326 * 52 * 51);
     assert_eq!(abstractions.len(), 1326 * 1326);
     let res = unsafe {
