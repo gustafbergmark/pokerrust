@@ -45,7 +45,6 @@ impl<const M: usize> Game<M> {
             );
             evaluate_gpu(self.builder, eval_ptr, Small, false);
         }
-        println!("Iteration time: {}s", start.elapsed().as_secs_f32());
         let _ = self.root.evaluate_state(
             &Vector::ones(),
             &Vector::ones(),
@@ -56,6 +55,7 @@ impl<const M: usize> Game<M> {
             self.builder,
             false,
         );
+        println!("Iteration time: {}s", start.elapsed().as_secs_f32());
 
         if cfg!(feature = "GPU") {
             let _ = self.root.evaluate_state(

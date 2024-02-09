@@ -122,7 +122,7 @@ __device__ void cuda_prefix_sum(Vector *input) {
     DataType prefix = temp[i];
     for (int b = 0; b < ITERS; b++) {
         int index = i * ITERS + b;
-        if (index < 1326) {
+        if (index <= 1326) {
             DataType t = input->values[index];
             input->values[index] = prefix;
             prefix += t;
@@ -272,8 +272,8 @@ evaluate_showdown(Vector *opponent_range, DataType bucket_reach, DataType player
         int index = tid + b * TPB;
         if (index < 1326) {
             int sorted_index = eval[index] & 2047;
-            sorted_range->values[index] =
-                    opponent_range->values[sorted_index] * reach_probs[abstractions[sorted_index]];
+            sorted_range->values[sorted_index] =
+                    opponent_range->values[index] * reach_probs[abstractions[index]];
         }
         if (index == 1326) {
             sorted_range->values[index] = 0.0f;
@@ -286,10 +286,6 @@ evaluate_showdown(Vector *opponent_range, DataType bucket_reach, DataType player
 
     // Calculate prefix sum in place
     cuda_prefix_sum(sorted_range);
-    if (tid == 0) {
-        sorted_range->values[1326] = sorted_range->values[1325] + opponent_range->values[eval[1325] & 2047];
-    }
-    __syncthreads();
 
     // Calculate showdown value of all hands
     int prev_group = eval[1326 + tid];
@@ -328,8 +324,8 @@ evaluate_showdown(Vector *opponent_range, DataType bucket_reach, DataType player
     for (int b = 0; b < ITERS; b++) {
         int index = tid + TPB * b;
         if (index < 1326) {
-            result->values[eval[index] & 2047] =
-                    (result->values[eval[index] & 2047] + sorted_range->values[index]) * bet;
+            result->values[index] =
+                    (result->values[index] + sorted_range->values[eval[index] & 2047]) * bet;
         }
     }
     __syncthreads();

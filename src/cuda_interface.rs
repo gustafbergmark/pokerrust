@@ -3,6 +3,7 @@ use crate::enums::Player;
 use crate::evaluator::Evaluator;
 use crate::state::Pointer;
 use crate::vector::{Float, Vector};
+use std::time::Instant;
 
 extern "C" {
     fn init_builder() -> *const std::ffi::c_void;
@@ -48,6 +49,7 @@ pub fn transfer_flop_eval<const M: usize>(
     eval: &Evaluator<M>,
     communal_cards: u64,
 ) -> *const std::ffi::c_void {
+    let start = Instant::now();
     assert_eq!(communal_cards.count_ones(), 3);
     let mut evals = vec![];
     let mut collisions = vec![];
@@ -63,8 +65,13 @@ pub fn transfer_flop_eval<const M: usize>(
             abstractions.append(&mut a);
         } else {
             assert_eq!((communal_cards | cards).count_ones(), 5);
-            let mut e = eval.vectorized_eval(communal_cards | cards).clone();
-            evals.append(&mut e);
+            // Inverse eval for GPU memory coalescing
+            let e = eval.vectorized_eval(communal_cards | cards).clone();
+            let mut inverse = e.clone();
+            for (i, &val) in e[..1326].into_iter().enumerate() {
+                inverse[(val & 2047) as usize] = i as u16 | (val & 2048);
+            }
+            evals.append(&mut inverse);
             let mut c = eval.collisions(communal_cards | cards).clone();
             collisions.append(&mut c);
             let mut a = eval.abstractions(communal_cards | cards).clone();
@@ -87,6 +94,7 @@ pub fn transfer_flop_eval<const M: usize>(
             abstractions.as_ptr(),
         )
     };
+    println!("Transfer eval time: {}", start.elapsed().as_secs_f32());
     return res;
 }
 

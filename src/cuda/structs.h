@@ -32,8 +32,9 @@ enum Player {
     Big,
 };
 
+// 1327 values because prefix sum needs 1 extra and it doesn't matter
 struct __align__(512) Vector {
-DataType values[1326];
+DataType values[1327];
 };
 
 struct __align__(512) AbstractVector {
