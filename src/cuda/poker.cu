@@ -601,44 +601,6 @@ __global__ void evaluate_all(Vector *opponent_ranges, Vector *results, State *ro
     remove_collisions(result, state->cards);
 }
 
-extern "C" {
-
-void evaluate_cuda(Builder *builder,
-                   Evaluator *evaluator,
-                   short updating_player,
-                   bool calc_exploit) {
-    cudaError_t err;
-    Vector *device_scratch;
-    size_t scratch_size = sizeof(Vector) * 63 * 49 * 9 * 10; // 10 scratch per kernel
-    cudaMalloc(&device_scratch, scratch_size);
-    cudaMemset(device_scratch, 0, scratch_size);
-    cudaMemcpy(builder->opponent_ranges, builder->communication, 63 * 49 * 9 * sizeof(Vector), cudaMemcpyHostToDevice);
-    cudaMemset(builder->results, 0, 63 * 49 * 9 * sizeof(Vector));
-    err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("Setup error: %s\n", cudaGetErrorString(err));
-        fflush(stdout);
-    }
-    evaluate_all<<< 63 * 49 * 9, TPB>>>(builder->opponent_ranges, builder->results, builder->states, evaluator,
-                                        updating_player == 0 ? Small : Big, calc_exploit, device_scratch);
-    cudaDeviceSynchronize();
-    err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("Main execution error: %s\n", cudaGetErrorString(err));
-        fflush(stdout);
-    }
-    cudaMemcpy(builder->communication, builder->results, 63 * 49 * 9 * sizeof(Vector), cudaMemcpyDeviceToHost);
-    cudaDeviceSynchronize();
-    cudaFree(device_scratch);
-    err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("Aggregation error: %s\n", cudaGetErrorString(err));
-        fflush(stdout);
-    }
-
-}
-}
-
 #ifdef TEST
 #include "builder.cu"
 #include <fcntl.h>
