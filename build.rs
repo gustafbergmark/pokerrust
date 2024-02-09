@@ -8,7 +8,7 @@ fn main() {
         .flag("arch=compute_89,code=sm_89")
         .flag("--use_fast_math")
         .flag("-lineinfo")
-        //.flag("--maxrregcount=40")
+        .flag("--maxrregcount=128")
         .file("src/cuda/poker.cu")
         .file("src/cuda/builder.cu")
         .file("src/cuda/evaluator.cu")

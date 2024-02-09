@@ -213,7 +213,7 @@ __device__ void update_strategy_abstract(State *__restrict__ state, Vector *__re
 
 __device__ void
 handle_collisions(short *coll_vec,
-                  Vector *sorted_range, Vector *sorted_eval) {
+                  Vector *sorted_range, Vector *result, short *eval) {
     int i = threadIdx.x;
     __syncthreads();
     // Handle collisions before prefix sum consumes sorted_range
@@ -229,7 +229,7 @@ handle_collisions(short *coll_vec,
                 sum += group_sum;
                 group_sum = 0.0f;
             }
-            atomicAdd(&sorted_eval->values[index & 2047], -sum);
+            atomicAdd(&result->values[eval[index & 2047] & 2047], -sum);
             group_sum += sorted_range->values[index & 2047];
         }
     }
@@ -244,7 +244,7 @@ handle_collisions(short *coll_vec,
             // Go backwards
             int index = coll_vec[offset + 50 - c];
             // Reverse ordering, because reverse iteration
-            atomicAdd(&sorted_eval->values[index & 2047], sum);
+            atomicAdd(&result->values[eval[index & 2047] & 2047], sum);
             group_sum += sorted_range->values[index & 2047];
 
             // 2048 bit set => new group
@@ -259,10 +259,11 @@ handle_collisions(short *coll_vec,
 
 __device__ DataType
 evaluate_showdown(Vector *opponent_range, DataType bucket_reach, DataType player_reach, Vector *result,
-                  Vector *sorted_range, Vector *sorted_eval, short *eval,
-                  short *coll_vec, DataType bet, short *abstractions, bool calc_exploit, DataType *reach_probs) {
+                  short *eval, short *coll_vec, DataType bet, short *abstractions, bool calc_exploit,
+                  DataType *reach_probs) {
     // Setup
     int tid = threadIdx.x;
+    __shared__ Vector sorted_range[1];
     reach_probs[tid] = bucket_reach;
     zero(result);
     __syncthreads();
@@ -281,9 +282,9 @@ evaluate_showdown(Vector *opponent_range, DataType bucket_reach, DataType player
     __syncthreads();
 
     // Handle card collisions
-    handle_collisions(coll_vec, sorted_range, sorted_eval);
+    handle_collisions(coll_vec, sorted_range, result, eval);
 
-    // Calculate prefix sum
+    // Calculate prefix sum in place
     cuda_prefix_sum(sorted_range);
     if (tid == 0) {
         sorted_range->values[1326] = sorted_range->values[1325] + opponent_range->values[eval[1325] & 2047];
@@ -292,13 +293,14 @@ evaluate_showdown(Vector *opponent_range, DataType bucket_reach, DataType player
 
     // Calculate showdown value of all hands
     int prev_group = eval[1326 + tid];
+    DataType values[ITERS];
     for (int b = 0; b < ITERS; b++) {
         int index = tid * ITERS + b;
         if (index < 1326) {
             // Impossible hand since overlap with communal cards
             if (eval[index] & 2048) { prev_group = index; }
-            DataType worse = sorted_range->values[prev_group];
-            sorted_eval->values[index] += worse;
+            // worse hands
+            values[b] = sorted_range->values[prev_group];
         }
     }
 
@@ -306,10 +308,18 @@ evaluate_showdown(Vector *opponent_range, DataType bucket_reach, DataType player
     for (int b = ITERS - 1; b >= 0; b--) {
         int index = tid * ITERS + b;
         if (index < 1326) {
-            DataType better = sorted_range->values[1326] - sorted_range->values[next_group];
-            sorted_eval->values[index] -= better;
+            // better hands
+            values[b] -= sorted_range->values[1326] - sorted_range->values[next_group];
             // Observe reverse order because of reverse iteration
             if (eval[index] & 2048) { next_group = index; }
+        }
+    }
+    __syncthreads();
+    // write registers to shared
+    for (int b = ITERS - 1; b >= 0; b--) {
+        int index = tid * ITERS + b;
+        if (index < 1326) {
+            sorted_range->values[index] = values[b];
         }
     }
 
@@ -318,7 +328,8 @@ evaluate_showdown(Vector *opponent_range, DataType bucket_reach, DataType player
     for (int b = 0; b < ITERS; b++) {
         int index = tid + TPB * b;
         if (index < 1326) {
-            result->values[eval[index] & 2047] = sorted_eval->values[index] * bet;
+            result->values[eval[index] & 2047] =
+                    (result->values[eval[index] & 2047] + sorted_range->values[index]) * bet;
         }
     }
     __syncthreads();
@@ -449,8 +460,7 @@ __device__ void evaluate_river(Vector *opponent_range,
     while (depth >= 0) {
         switch (state->terminal) {
             case Showdown :
-                evaluate_showdown(opponent_range, opponent_reach[depth], player_reach[depth], scratch + depth,
-                                  scratch + depth + 1, scratch + depth + 2, eval,
+                evaluate_showdown(opponent_range, opponent_reach[depth], player_reach[depth], scratch + depth, eval,
                                   coll_vec, state->sbbet, abstractions, calc_exploit, reach_probs);
                 state = state->parent;
                 depth--;
