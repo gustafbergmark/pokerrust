@@ -101,7 +101,7 @@ impl<const M: usize> Evaluator<M> {
                                     prev_eval = eval;
                                     next_group = sorted_index + 1;
                                 }
-                                if (sorted_index % 6 == 10) || (sorted_index == 1325) {
+                                if (sorted_index % 6 == 5) || (sorted_index == 1325) {
                                     result[1326 + 256 + sorted_index / 6] = next_group as u16;
                                 }
                             }
@@ -117,7 +117,7 @@ impl<const M: usize> Evaluator<M> {
                                 let hand = card_order[sorted_index as usize];
                                 let cards = separate_cards(hand);
                                 for c in cards {
-                                    let mut val = i as u16;
+                                    let mut val = sorted_index;
                                     // Include new group information in 2048 bit
                                     if current_group > card_group[c] {
                                         card_group[c] = current_group;

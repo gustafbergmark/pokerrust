@@ -49,7 +49,7 @@ pub fn transfer_flop_eval<const M: usize>(
     eval: &Evaluator<M>,
     communal_cards: u64,
 ) -> *const std::ffi::c_void {
-    let start = Instant::now();
+    let _start = Instant::now();
     assert_eq!(communal_cards.count_ones(), 3);
     let mut evals = vec![];
     let mut collisions = vec![];
@@ -69,9 +69,12 @@ pub fn transfer_flop_eval<const M: usize>(
             let e = eval.vectorized_eval(communal_cards | cards).clone();
             let mut inverse = e.clone();
             for (i, &val) in e[..1326].into_iter().enumerate() {
-                inverse[(val & 2047) as usize] = i as u16 | (val & 2048);
+                inverse[(val & 2047) as usize] &= 2048;
+                inverse[(val & 2047) as usize] |= i as u16;
             }
             evals.append(&mut inverse);
+            //evals.extend_from_slice(&e);
+
             let mut c = eval.collisions(communal_cards | cards).clone();
             collisions.append(&mut c);
             let mut a = eval.abstractions(communal_cards | cards).clone();
@@ -94,7 +97,7 @@ pub fn transfer_flop_eval<const M: usize>(
             abstractions.as_ptr(),
         )
     };
-    println!("Transfer eval time: {}", start.elapsed().as_secs_f32());
+    //println!("Transfer eval time: {}", _start.elapsed().as_secs_f32());
     return res;
 }
 

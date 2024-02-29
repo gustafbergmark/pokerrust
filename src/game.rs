@@ -28,7 +28,7 @@ impl<const M: usize> Game<M> {
     }
 
     pub fn perform_iter(&mut self, iter: usize) {
-        let start = Instant::now();
+        let _start = Instant::now();
         // 7 is the fixed flop
         let eval_ptr = Pointer(transfer_flop_eval(&self.evaluator, 7));
 
@@ -41,7 +41,7 @@ impl<const M: usize> Game<M> {
                 false,
                 0,
                 self.builder,
-                false,
+                true,
             );
             evaluate_gpu(self.builder, eval_ptr, Small, false);
         }
@@ -55,7 +55,7 @@ impl<const M: usize> Game<M> {
             self.builder,
             false,
         );
-        println!("Iteration time: {}s", start.elapsed().as_secs_f32());
+        println!("Iteration time: {}s", _start.elapsed().as_secs_f32());
 
         if cfg!(feature = "GPU") {
             let _ = self.root.evaluate_state(
@@ -81,8 +81,8 @@ impl<const M: usize> Game<M> {
             self.builder,
             false,
         );
-        let iter_time = start.elapsed().as_secs_f32();
-        if iter % 10 == 0 {
+        let iter_time = _start.elapsed().as_secs_f32();
+        if iter % 1 == 0 {
             if cfg!(feature = "GPU") {
                 let _ = self.root.evaluate_state(
                     &Vector::ones(),
@@ -137,7 +137,7 @@ impl<const M: usize> Game<M> {
                 iter,
                 (exp_sb.sum() + exp_bb.sum()) * 1000.0 / 1326.0 / 1255.0,
                 iter_time,
-                start.elapsed().as_secs_f32() - iter_time,
+                _start.elapsed().as_secs_f32() - iter_time,
             );
         }
         free_eval(eval_ptr);

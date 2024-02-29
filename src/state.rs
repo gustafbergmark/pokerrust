@@ -7,6 +7,7 @@ use crate::evaluator::{separate_cards, Evaluator};
 use crate::permutation_handler::permute;
 use crate::strategy::{AbstractStrategy, RegularStrategy, Strategy};
 use crate::vector::{Float, Vector};
+use assert_approx_eq::assert_approx_eq;
 use itertools::Itertools;
 use poker::Suit::*;
 use poker::{Card, Suit};
@@ -15,6 +16,7 @@ use rayon::iter::ParallelIterator;
 use std::collections::HashSet;
 use std::ffi::c_void;
 use std::iter::zip;
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Pointer(pub(crate) *const c_void);
 unsafe impl Send for Pointer {}
@@ -271,7 +273,7 @@ impl<const M: usize> State<M> {
                     if updating_player == self.next_to_act {
                         if !calc_exploit {
                             results.push(utility);
-                            average_strategy += utility * action_prob;
+                            average_strategy += utility; //* action_prob;
                         } else {
                             for i in 0..1326 {
                                 average_strategy[i] = average_strategy[i].max(utility[i]);
@@ -339,8 +341,8 @@ impl<const M: usize> State<M> {
                 let mut total = Vector::default();
                 let res = self
                     .next_states
-                    .par_iter_mut()
-                    //.iter_mut()
+                    //.par_iter_mut()
+                    .iter_mut()
                     .map(|next_state| {
                         let mut new_sb_range = *sb_range;
                         let mut new_bb_range = *bb_range;
@@ -376,7 +378,7 @@ impl<const M: usize> State<M> {
                 total * (1.0 / (self.next_states.len() as Float))
             }
             River => {
-                if cfg!(feature = "GPU") {
+                let gpu_res = //if cfg!(feature = "GPU") {
                     if upload {
                         upload_gpu(
                             builder,
@@ -387,7 +389,10 @@ impl<const M: usize> State<M> {
                         Vector::default()
                     } else {
                         download_gpu(builder, self.gpu_pointer.expect("Missing GPU index"))
-                    }
+                    };
+                //};
+                let cpu_res = if upload {
+                    Vector::default()
                 } else {
                     let mut total = Vector::default();
                     assert_eq!(self.next_states.len(), 1);
@@ -428,6 +433,20 @@ impl<const M: usize> State<M> {
                     }
                     assert_eq!(count, 48);
                     total * (1.0 / 48.0)
+                };
+                if !upload {
+                    for i in 0..1326 {
+                        //dbg!(gpu_res[i], cpu_res[i]);
+                        assert_approx_eq!(gpu_res[i], cpu_res[i], 1e-1);
+                    }
+                    panic!("run once");
+                    println!("DONE");
+                }
+
+                if cfg!(feature = "GPU") {
+                    gpu_res
+                } else {
+                    cpu_res
                 }
             }
         }
@@ -479,11 +498,11 @@ impl<const M: usize> State<M> {
         communal_cards: u64,
     ) -> Vector {
         let mut result = Vector::default();
+        let opponent_range = &Vector::ones();
+        //return result;
         let card_order = evaluator.card_order();
-        let (self_bet, opponent_bet) = match updating_player {
-            Small => (self.sbbet, self.bbbet),
-            Big => (self.bbbet, self.sbbet),
-        };
+        assert_eq!(self.sbbet, self.bbbet);
+        let bet = self.sbbet;
 
         let sorted = &evaluator.vectorized_eval(communal_cards);
         let mut groups = vec![];
@@ -517,9 +536,9 @@ impl<const M: usize> State<M> {
                     current_collisions[c] += opponent_range[index];
                 }
             }
-            cumulative += current_cumulative * opponent_bet;
+            cumulative += current_cumulative;
             for i in 0..52 {
-                collisions[i] += current_collisions[i] * opponent_bet;
+                collisions[i] += current_collisions[i];
             }
         }
 
@@ -542,11 +561,11 @@ impl<const M: usize> State<M> {
                     current_collisions[c] += opponent_range[index];
                 }
             }
-            cumulative += current_cumulative * self_bet;
+            cumulative += current_cumulative;
             for i in 0..52 {
-                collisions[i] += current_collisions[i] * self_bet;
+                collisions[i] += current_collisions[i];
             }
         }
-        result
+        result * bet
     }
 }

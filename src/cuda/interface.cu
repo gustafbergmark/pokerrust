@@ -24,6 +24,10 @@ void evaluate_cuda(Builder *builder,
         printf("Setup error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
     }
+//    for(int i = 0; i < 1326; i++) {
+//        printf("%d %f\n", i, builder->communication[0].values[i]);
+//    }
+//    fflush(stdout);
     evaluate_all<<< 63 * 49 * 9, TPB>>>(builder->opponent_ranges, builder->results, builder->states, evaluator,
                                         updating_player == 0 ? Small : Big, calc_exploit, device_scratch);
     cudaDeviceSynchronize();
@@ -40,6 +44,7 @@ void evaluate_cuda(Builder *builder,
         printf("Aggregation error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
     }
+    fflush(stdout);
 
 }
 Evaluator *transfer_flop_eval_cuda(long flop, long *card_order, short *card_indexes, short *eval, short *coll_vec,

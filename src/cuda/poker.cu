@@ -5,6 +5,7 @@
 #include "evaluator.cuh"
 #include <sys/time.h>
 #include <cmath>
+#include <assert.h>
 
 __device__ void multiply(Vector *__restrict__ v1, Vector *__restrict__ v2, Vector *__restrict__ res) {
     int i = threadIdx.x;
@@ -229,8 +230,8 @@ handle_collisions(short *coll_vec,
                 sum += group_sum;
                 group_sum = 0.0f;
             }
-            atomicAdd(&result->values[eval[index & 2047] & 2047], -sum);
-            group_sum += sorted_range->values[index & 2047];
+            atomicAdd(&result->values[index & 2047], -sum);
+            group_sum += sorted_range->values[eval[index & 2047] & 2047];
         }
     }
 
@@ -244,8 +245,8 @@ handle_collisions(short *coll_vec,
             // Go backwards
             int index = coll_vec[offset + 50 - c];
             // Reverse ordering, because reverse iteration
-            atomicAdd(&result->values[eval[index & 2047] & 2047], sum);
-            group_sum += sorted_range->values[index & 2047];
+            atomicAdd(&result->values[index & 2047], sum);
+            group_sum += sorted_range->values[eval[index & 2047] & 2047];
 
             // 2048 bit set => new group
             if (index & 2048) {
@@ -267,16 +268,14 @@ evaluate_showdown(Vector *opponent_range, DataType bucket_reach, DataType player
     reach_probs[tid] = bucket_reach;
     zero(result);
     __syncthreads();
+    //return 0;
 
     for (int b = 0; b < ITERS; b++) {
         int index = tid + b * TPB;
         if (index < 1326) {
             int sorted_index = eval[index] & 2047;
             sorted_range->values[sorted_index] =
-                    opponent_range->values[index] * reach_probs[abstractions[index]];
-        }
-        if (index == 1326) {
-            sorted_range->values[index] = 0.0f;
+                    1.0f;//opponent_range->values[index] * reach_probs[abstractions[index]];
         }
     }
     __syncthreads();
@@ -293,7 +292,6 @@ evaluate_showdown(Vector *opponent_range, DataType bucket_reach, DataType player
     for (int b = 0; b < ITERS; b++) {
         int index = tid * ITERS + b;
         if (index < 1326) {
-            // Impossible hand since overlap with communal cards
             if (eval[index] & 2048) { prev_group = index; }
             // worse hands
             values[b] = sorted_range->values[prev_group];
@@ -312,7 +310,7 @@ evaluate_showdown(Vector *opponent_range, DataType bucket_reach, DataType player
     }
     __syncthreads();
     // write registers to shared
-    for (int b = ITERS - 1; b >= 0; b--) {
+    for (int b = 0; b < ITERS; b++) {
         int index = tid * ITERS + b;
         if (index < 1326) {
             sorted_range->values[index] = values[b];
@@ -347,7 +345,7 @@ evaluate_showdown(Vector *opponent_range, DataType bucket_reach, DataType player
         for (int b = 0; b < ITERS; b++) {
             int index = tid + TPB * b;
             if (index < 1326) {
-                result->values[index] *= reach_probs[abstractions[index]];
+                //result->values[index] *= reach_probs[abstractions[index]];
             }
         }
     }
@@ -357,12 +355,12 @@ evaluate_showdown(Vector *opponent_range, DataType bucket_reach, DataType player
 
 
 __device__ DataType
-evaluate_fold(Vector *opponent_range, DataType bucket_reach, DataType player_reach, short *card_indexes, DataType bet,
+evaluate_fold(Vector *opponent_range, DataType opponent_reach, DataType player_reach, short *card_indexes, DataType bet,
               Vector *result, short *abstractions, bool calc_exploit, DataType *reach_probs) {
     __shared__ DataType card_collisions[52];
     // Setup
     int tid = threadIdx.x;
-    reach_probs[tid] = bucket_reach;
+    reach_probs[tid] = opponent_reach;
     __syncthreads();
     for (int b = 0; b < ITERS; b++) {
         int index = tid + b * TPB;
@@ -391,7 +389,9 @@ evaluate_fold(Vector *opponent_range, DataType bucket_reach, DataType player_rea
             int card1 = __ffsll(cards) - 1;
             cards -= 1l << card1;
             int card2 = __ffsll(cards) - 1;
-            result->values[index] += (total - card_collisions[card1] - card_collisions[card2]) * bet;
+            assert(cards - (1l<<card2) == 0);
+            result->values[index] += (total - card_collisions[card1] - card_collisions[card2]);
+            result->values[index] *= bet;
         }
     }
     __syncthreads();
@@ -406,6 +406,7 @@ evaluate_fold(Vector *opponent_range, DataType bucket_reach, DataType player_rea
     }
     __syncthreads();
     DataType res = reach_probs[tid];
+    __syncthreads();
     reach_probs[tid] = player_reach;
     __syncthreads();
     // Multiply with player reach prob right now
@@ -413,7 +414,7 @@ evaluate_fold(Vector *opponent_range, DataType bucket_reach, DataType player_rea
         for (int b = 0; b < ITERS; b++) {
             int index = tid + TPB * b;
             if (index < 1326) {
-                result->values[index] *= reach_probs[abstractions[index]];
+                //result->values[index] *= reach_probs[abstractions[index]];
             }
         }
     }
@@ -456,7 +457,7 @@ __device__ void evaluate_river(Vector *opponent_range,
     while (depth >= 0) {
         switch (state->terminal) {
             case Showdown :
-                evaluate_showdown(opponent_range, opponent_reach[depth], player_reach[depth], scratch + depth, eval,
+                average_abstract[depth] = evaluate_showdown(opponent_range, opponent_reach[depth], player_reach[depth], scratch + depth, eval,
                                   coll_vec, state->sbbet, abstractions, calc_exploit, reach_probs);
                 state = state->parent;
                 depth--;
@@ -508,7 +509,7 @@ __device__ void evaluate_river(Vector *opponent_range,
                                 average_abstract[depth] += average_abstract[depth + 1] / ((DataType) transitions);
                             }
                             // We add the util to the regrets here, as it won't be read again this iteration, and we don't
-                            // have to store the utility til later.
+                            // have to store the utility until later.
                             state->card_strategies[transition - 1]->values[tid] = regret + average_abstract[depth + 1];
                         } else {
                             for (int b = 0; b < ITERS; b++) {
@@ -555,8 +556,8 @@ __device__ void evaluate_river(Vector *opponent_range,
                                     opponent_reach[depth] * state->card_strategies[transition]->values[tid] /
                                     strat_sums[depth];
                         } else {
-                            player_reach[depth + 1] =
-                                    player_reach[depth] / ((DataType) transitions);
+                            opponent_reach[depth + 1] =
+                                    opponent_reach[depth] / ((DataType) transitions);
                         }
                         player_reach[depth + 1] = player_reach[depth];
                     }
@@ -570,7 +571,6 @@ __device__ void evaluate_river(Vector *opponent_range,
             }
         }
     }
-
 }
 
 __global__ void evaluate_all(Vector *opponent_ranges, Vector *results, State *root_states, Evaluator *evaluator,
@@ -586,7 +586,7 @@ __global__ void evaluate_all(Vector *opponent_ranges, Vector *results, State *ro
         if (river & state->cards) continue;
         Vector *new_range = scratch;
         copy(opponent_range, new_range);
-        remove_collisions(new_range, river);
+        remove_collisions(new_range, river | state->cards);
         long set = (state->cards | river) ^ evaluator->flop;
         int eval_index = get_index(set);
         short *eval = evaluator->eval + eval_index * (1326 + 256 * 2);
@@ -594,11 +594,11 @@ __global__ void evaluate_all(Vector *opponent_ranges, Vector *results, State *ro
         evaluate_river(new_range, next, scratch + 1, state->cards | river, evaluator->card_indexes, eval,
                        coll_vec, evaluator->abstractions + eval_index * 1326,
                        updating_player, calc_exploit);
-        remove_collisions(scratch + 1, river);
+        remove_collisions(scratch + 1, river | state->cards);
         add_assign(result, scratch + 1);
     }
     divide(result, 48.0f);
-    remove_collisions(result, state->cards);
+    //remove_collisions(result, state->cards);
 }
 
 #ifdef TEST

@@ -12,7 +12,7 @@ fn main() {
         //.flag("-dlto")
         .flag("--no-exceptions")
         //.flag("-restrict")
-        //.flag("--maxrregcount=80")
+        .flag("--maxrregcount=80")
         .file("src/cuda/interface.cu")
         .compile("poker");
 
