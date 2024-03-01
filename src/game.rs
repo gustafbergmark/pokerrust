@@ -82,7 +82,7 @@ impl<const M: usize> Game<M> {
             false,
         );
         let iter_time = _start.elapsed().as_secs_f32();
-        if iter % 1 == 0 {
+        if iter % 10 == 0 {
             if cfg!(feature = "GPU") {
                 let _ = self.root.evaluate_state(
                     &Vector::ones(),

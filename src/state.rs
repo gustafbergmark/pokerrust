@@ -207,6 +207,7 @@ impl<const M: usize> State<M> {
                     }
                     state.terminal = NonTerminal;
                     state.cards = self.cards | num_river;
+                    state.card_strategies = Strategy::Abstract(AbstractStrategy::new());
                     state.next_to_act = Small;
                     break;
                 }
@@ -273,7 +274,7 @@ impl<const M: usize> State<M> {
                     if updating_player == self.next_to_act {
                         if !calc_exploit {
                             results.push(utility);
-                            average_strategy += utility; //* action_prob;
+                            average_strategy += utility * action_prob;
                         } else {
                             for i in 0..1326 {
                                 average_strategy[i] = average_strategy[i].max(utility[i]);
@@ -292,7 +293,6 @@ impl<const M: usize> State<M> {
                     self.card_strategies
                         .update_add(&update, evaluator, communal_cards);
                 }
-
                 average_strategy
             }
 
@@ -378,7 +378,7 @@ impl<const M: usize> State<M> {
                 total * (1.0 / (self.next_states.len() as Float))
             }
             River => {
-                let gpu_res = //if cfg!(feature = "GPU") {
+                if cfg!(feature = "GPU") {
                     if upload {
                         upload_gpu(
                             builder,
@@ -389,10 +389,7 @@ impl<const M: usize> State<M> {
                         Vector::default()
                     } else {
                         download_gpu(builder, self.gpu_pointer.expect("Missing GPU index"))
-                    };
-                //};
-                let cpu_res = if upload {
-                    Vector::default()
+                    }
                 } else {
                     let mut total = Vector::default();
                     assert_eq!(self.next_states.len(), 1);
@@ -433,20 +430,6 @@ impl<const M: usize> State<M> {
                     }
                     assert_eq!(count, 48);
                     total * (1.0 / 48.0)
-                };
-                if !upload {
-                    for i in 0..1326 {
-                        //dbg!(gpu_res[i], cpu_res[i]);
-                        assert_approx_eq!(gpu_res[i], cpu_res[i], 1e-1);
-                    }
-                    panic!("run once");
-                    println!("DONE");
-                }
-
-                if cfg!(feature = "GPU") {
-                    gpu_res
-                } else {
-                    cpu_res
                 }
             }
         }
@@ -498,7 +481,6 @@ impl<const M: usize> State<M> {
         communal_cards: u64,
     ) -> Vector {
         let mut result = Vector::default();
-        let opponent_range = &Vector::ones();
         //return result;
         let card_order = evaluator.card_order();
         assert_eq!(self.sbbet, self.bbbet);

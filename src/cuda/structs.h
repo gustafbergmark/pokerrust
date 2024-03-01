@@ -9,6 +9,7 @@
 #define TPB 256
 #define ITERS 6
 #define ABSTRACTIONS 256
+#define CUTOFF 1e-4
 
 enum TerminalState {
     NonTerminal,
