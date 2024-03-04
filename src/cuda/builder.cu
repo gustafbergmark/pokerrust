@@ -84,9 +84,10 @@ int get_action(State *state, Action action, State *new_states) {
 
 void
 add_transition(State *parent, State *child, State *root, State *device_root,
-               AbstractVector *abstract_vectors, int *abstract_vector_index) {
+               AbstractVector *abstract_vectors, AbstractVector *updates, int *abstract_vector_index) {
     if (parent->terminal == NonTerminal) {
         parent->card_strategies[parent->transitions] = (abstract_vectors + *abstract_vector_index);
+        parent->updates[parent->transitions] = (updates + *abstract_vector_index);
         *abstract_vector_index += 1;
     }
     // Update pointers to work on gpu;
@@ -97,7 +98,7 @@ add_transition(State *parent, State *child, State *root, State *device_root,
 
 
 int build(State *state, short raises, State *root, State *device_root, int *state_index,
-          AbstractVector *abstract_vectors, int *abstract_vector_index) {
+          AbstractVector *abstract_vectors, AbstractVector *updates, int *abstract_vector_index) {
     Action actions[3] = {};
     int count = 1;
     int num_actions = possible_actions(state, raises, actions);
@@ -109,8 +110,8 @@ int build(State *state, short raises, State *root, State *device_root, int *stat
         get_action(state, action, new_state);
         *state_index += 1;
         count += build(new_state, new_raises, root, device_root, state_index,
-                       abstract_vectors, abstract_vector_index);
-        add_transition(state, new_state, root, device_root, abstract_vectors,
+                       abstract_vectors, updates, abstract_vector_index);
+        add_transition(state, new_state, root, device_root, abstract_vectors, updates,
                        abstract_vector_index);
 
 
@@ -120,7 +121,7 @@ int build(State *state, short raises, State *root, State *device_root, int *stat
 
 void
 build_river(long cards, DataType bet, State *root, State *device_root, int *state_index,
-            AbstractVector *abstract_vectors, int *abstract_vector_index) {
+            AbstractVector *abstract_vectors, AbstractVector* updates, int *abstract_vector_index) {
     *root = {.terminal = River,
             .action = Call,
             .cards = cards,
@@ -131,7 +132,7 @@ build_river(long cards, DataType bet, State *root, State *device_root, int *stat
             .card_strategies = {},
             .next_states =  {}};
     *state_index += 1;
-    int count = build(root, 0, root, device_root, state_index, abstract_vectors,
+    int count = build(root, 0, root, device_root, state_index, abstract_vectors, updates,
                       abstract_vector_index);
 //    printf("count: %d\n",count); // 28
 //    fflush(stdout);

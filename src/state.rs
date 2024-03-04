@@ -341,8 +341,8 @@ impl<const M: usize> State<M> {
                 let mut total = Vector::default();
                 let res = self
                     .next_states
-                    //.par_iter_mut()
-                    .iter_mut()
+                    .par_iter_mut()
+                    //.iter_mut()
                     .map(|next_state| {
                         let mut new_sb_range = *sb_range;
                         let mut new_bb_range = *bb_range;
@@ -428,10 +428,31 @@ impl<const M: usize> State<M> {
                         }
                         total += res;
                     }
+                    // Apply the aggregated updates from all iteration on the abstract strategy
+                    next_state.apply_updates(updating_player);
                     assert_eq!(count, 48);
                     total * (1.0 / 48.0)
                 }
             }
+        }
+    }
+    pub fn apply_updates(&mut self, updating_player: Player) {
+        match self.terminal {
+            NonTerminal => {
+                match &mut self.card_strategies {
+                    Strategy::Regular(_) => {}
+                    Strategy::Abstract(strat) => {
+                        if self.next_to_act == updating_player {
+                            strat.apply_updates();
+                        }
+                    }
+                }
+                for next in self.next_states.iter_mut() {
+                    next.apply_updates(updating_player);
+                }
+            }
+
+            _ => {}
         }
     }
 

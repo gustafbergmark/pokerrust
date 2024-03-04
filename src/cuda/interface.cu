@@ -74,6 +74,7 @@ Builder *init_builder() {
     builder->current_index = 0;
     cudaMalloc(&builder->states, 63 * 49 * 9 * 28 * sizeof(State));
     cudaMalloc(&builder->abstract_vectors, 63 * 49 * 9 * 26 * sizeof(AbstractVector));
+    cudaMalloc(&builder->updates, 63 * 49 * 9 * 26 * sizeof(AbstractVector));
     cudaMemset(builder->abstract_vectors, 0, 63 * 49 * 26 * 9 * sizeof(AbstractVector));
     cudaMallocHost(&builder->communication, 63 * 49 * 9 * sizeof(Vector));
     cudaMalloc(&builder->opponent_ranges, 63 * 49 * 9 * sizeof(Vector));
@@ -101,9 +102,10 @@ int build_river_cuda(long cards, DataType bet, Builder *builder) {
 
     State *device_root = builder->states + builder->current_index * 28;
     AbstractVector *abstract_vectors = builder->abstract_vectors + builder->current_index * 26;
+    AbstractVector *updates = builder->updates + builder->current_index * 26;
     builder->current_index += 1;
 
-    build_river(cards, bet, root, device_root, &state_index, abstract_vectors,
+    build_river(cards, bet, root, device_root, &state_index, abstract_vectors, updates,
                 &abstract_vector_index);
     cudaMemcpy(device_root, root, state_size, cudaMemcpyHostToDevice);
     cudaDeviceSynchronize();

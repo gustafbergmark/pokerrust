@@ -55,7 +55,7 @@ impl<const M: usize> Game<M> {
             self.builder,
             false,
         );
-        println!("Iteration time: {}s", _start.elapsed().as_secs_f32());
+        //println!("Iteration time: {}s", _start.elapsed().as_secs_f32());
 
         if cfg!(feature = "GPU") {
             let _ = self.root.evaluate_state(
@@ -135,7 +135,7 @@ impl<const M: usize> Game<M> {
                   Iter time: {} \n\
                   Exploit calc time: {} \n",
                 iter,
-                (exp_sb.sum() + exp_bb.sum()) * 1000.0 / 1326.0 / 1255.0,
+                (exp_sb.sum() + exp_bb.sum()) * 1000.0 / 1326.0 / 1255.0 / 2.0, // 1000 for milli, 1326 for own hands, 1255 for opponent, 2 for two strategies
                 iter_time,
                 _start.elapsed().as_secs_f32() - iter_time,
             );

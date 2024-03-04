@@ -161,58 +161,6 @@ __device__ DataType get_strategy_sum(State *state) {
 }
 
 __device__ void
-get_strategy_abstract(State *state, Vector *scratch, Vector *result, short *abstractions) {
-    int tid = threadIdx.x;
-    Vector *sum = scratch;
-    int transitions = state->transitions;
-    DataType vals[2] = {0.0f, 0.0f};
-#pragma unroll 3
-    for (int k = 0; k < transitions; k++) {
-        vals[0] += state->card_strategies[k]->values[tid];
-        vals[1] += state->card_strategies[k]->values[tid + 128];
-    }
-    sum->values[tid] = vals[0];
-    sum->values[tid + 128] = vals[1];
-    __syncthreads();
-    for (int b = 0; b < ITERS; b++) {
-        int index = tid + TPB * b;
-        if (index < 1326) {
-            short abstract_index = abstractions[index];
-            for (int k = 0; k < transitions; k++) {
-                if (sum->values[abstract_index] <= 1e-4f) {
-                    result[k].values[index] = 1.0f / ((DataType) transitions);
-                } else {
-                    result[k].values[index] =
-                            state->card_strategies[k]->values[abstract_index] / sum->values[abstract_index];
-                }
-            }
-        }
-    }
-    __syncthreads();
-}
-
-__device__ void update_strategy_abstract(State *__restrict__ state, Vector *__restrict__ update,
-                                         short *abstractions) {
-    int tid = threadIdx.x;
-    __syncthreads();
-    for (int b = 0; b < ITERS; b++) {
-        int index = tid + TPB * b;
-        if (index < 1326) {
-            short abstract_index = abstractions[index];
-            for (int k = 0; k < state->transitions; k++) {
-                atomicAdd(&state->card_strategies[k]->values[abstract_index], update[k].values[index]);
-            }
-        }
-    }
-    __syncthreads();
-    for (int k = 0; k < state->transitions; k++) {
-        state->card_strategies[k]->values[tid] = max(state->card_strategies[k]->values[tid], 0.0f);
-        state->card_strategies[k]->values[tid + 128] = max(state->card_strategies[k]->values[tid + 128], 0.0f);
-    }
-    __syncthreads();
-}
-
-__device__ void
 handle_collisions(short *coll_vec,
                   Vector *sorted_range, Vector *result, short *eval) {
     int i = threadIdx.x;
@@ -512,7 +460,7 @@ __device__ void evaluate_river(Vector *opponent_range,
                             }
                             // We add the util to the regrets here, as it won't be read again this iteration, and we don't
                             // have to store the utility until later.
-                            state->card_strategies[transition - 1]->values[tid] += average_abstract[depth + 1];
+                            state->updates[transition - 1]->values[tid] += average_abstract[depth + 1];
                         } else {
                             for (int b = 0; b < ITERS; b++) {
                                 int index = tid + TPB * b;
@@ -532,10 +480,7 @@ __device__ void evaluate_river(Vector *opponent_range,
                     if ((state->next_to_act == updating_player) && !calc_exploit) {
                         // update strategy and remove the utility of the average strategy
                         for (int k = 0; k < transitions; k++) {
-                            DataType regret = state->card_strategies[k]->values[tid];
-                            regret -= average_abstract[depth];
-                            regret = max(regret, 0.0f);
-                            state->card_strategies[k]->values[tid] = regret;
+                            state->updates[k]->values[tid] -= average_abstract[depth];
                         }
                     }
                     state = state->parent;
@@ -574,21 +519,58 @@ __device__ void evaluate_river(Vector *opponent_range,
             }
         }
     }
-//    if (!calc_exploit) {
-//        __shared__ DataType test[TPB];
-//        test[tid] = 0.0f;
-//        __syncthreads();
-//        for (int b = 0; b < ITERS; b++) {
-//            int index = tid + TPB * b;
-//            if (index < 1326) {
-//                atomicAdd(&test[abstractions[index]], scratch->values[index]);
-//            }
-//        }
-//        __syncthreads();
-//        if (abs(test[tid] - average_abstract[0]) > 1e-4) {
-//            printf("fail: %f %f\n", test[tid], average_abstract[0]);
-//        }
-//    }
+}
+
+__device__ void apply_updates(State *root_state,
+                               Player updating_player) {
+    __syncthreads();
+    State *state = root_state;
+    int tid = threadIdx.x;
+    // Every 2 bits signifies the transition count at a specific depth
+    int transition_state = 0;
+    int depth = 0;
+
+    while (depth >= 0) {
+        switch (state->terminal) {
+            case Showdown :
+                state = state->parent;
+                depth--;
+                break;
+            case SBWins :
+                state = state->parent;
+                depth--;
+                break;
+            case BBWins :
+                state = state->parent;
+                depth--;
+                break;
+            case NonTerminal : {
+                int transitions = state->transitions;
+                int transition = (transition_state >> (2 * depth)) & 3;
+                if (transition == transitions) {
+                    state = state->parent;
+                    depth--;
+                } else {
+                    // Apply updates
+                    if (state->next_to_act == updating_player) {
+                        DataType regret = state->card_strategies[transition]->values[tid];
+                        regret += state->updates[transition]->values[tid];
+                        regret = max(regret, 0.0f);
+                        state->card_strategies[transition]->values[tid] = regret;
+                        // reset cumulative updates
+                        state->updates[transition]->values[tid] = 0.0f;
+                    }
+
+                    state = state->next_states[transition];
+                    // Reset transition count for depth + 1
+                    transition_state &= ~(3 << ((depth + 1) * 2));
+                    transition_state += 1 << (depth * 2);
+                    depth++;
+                }
+                break;
+            }
+        }
+    }
 }
 
 __global__ void evaluate_all(Vector *opponent_ranges, Vector *results, State *root_states, Evaluator *evaluator,
@@ -614,6 +596,9 @@ __global__ void evaluate_all(Vector *opponent_ranges, Vector *results, State *ro
                        updating_player, calc_exploit);
         remove_collisions(scratch + 1, river | state->cards);
         add_assign(result, scratch + 1);
+    }
+    if(!calc_exploit) {
+        apply_updates(next, updating_player);
     }
     divide(result, 48.0f);
     //remove_collisions(result, state->cards);

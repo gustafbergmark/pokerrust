@@ -85,6 +85,7 @@ impl RegularStrategy {
 #[derive(Clone, PartialEq)]
 pub(crate) struct AbstractStrategy<const M: usize> {
     regrets: Vec<[Float; M]>,
+    updates: Vec<[Float; M]>,
 }
 
 impl<const M: usize> Debug for AbstractStrategy<M> {
@@ -95,11 +96,15 @@ impl<const M: usize> Debug for AbstractStrategy<M> {
 
 impl<const M: usize> AbstractStrategy<M> {
     pub fn new() -> Self {
-        AbstractStrategy { regrets: vec![] }
+        AbstractStrategy {
+            regrets: vec![],
+            updates: vec![],
+        }
     }
 
     pub fn add_strategy(&mut self) {
         self.regrets.push([Float::default(); M]);
+        self.updates.push([Float::default(); M]);
     }
 
     pub fn update_add(&mut self, updates: &Vec<Vector>, evaluator: &Evaluator<M>, cards: u64) {
@@ -108,12 +113,7 @@ impl<const M: usize> AbstractStrategy<M> {
             let abstract_index = abstraction[i] as usize;
             assert!(abstract_index < M);
             for k in 0..self.regrets.len() {
-                self.regrets[k][abstract_index] += updates[k][i]
-            }
-        }
-        for k in 0..self.regrets.len() {
-            for i in 0..M {
-                self.regrets[k][i] = self.regrets[k][i].max(0.0);
+                self.updates[k][abstract_index] += updates[k][i]
             }
         }
     }
@@ -139,5 +139,15 @@ impl<const M: usize> AbstractStrategy<M> {
             }
         }
         regret_match
+    }
+
+    pub fn apply_updates(&mut self) {
+        for k in 0..self.regrets.len() {
+            for i in 0..M {
+                self.regrets[k][i] += self.updates[k][i];
+                self.regrets[k][i] = self.regrets[k][i].max(0.0);
+                self.updates[k][i] = 0.0;
+            }
+        }
     }
 }

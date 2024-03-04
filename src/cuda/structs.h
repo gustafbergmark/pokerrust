@@ -51,6 +51,7 @@ struct __align__(32) State {
     Player next_to_act;
     short transitions;
     AbstractVector *card_strategies[3];
+    AbstractVector *updates[3];
     State *next_states[3];
     State *parent;
 };
@@ -59,6 +60,7 @@ struct Builder {
     int current_index;
     State *states;
     AbstractVector *abstract_vectors;
+    AbstractVector *updates;
     Vector *communication;
     Vector *opponent_ranges;
     Vector *results;
