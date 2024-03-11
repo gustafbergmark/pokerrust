@@ -7,7 +7,6 @@ use crate::evaluator::{separate_cards, Evaluator};
 use crate::permutation_handler::permute;
 use crate::strategy::{AbstractStrategy, RegularStrategy, Strategy};
 use crate::vector::{Float, Vector};
-use assert_approx_eq::assert_approx_eq;
 use itertools::Itertools;
 use poker::Suit::*;
 use poker::{Card, Suit};
@@ -296,9 +295,7 @@ impl<const M: usize> State<M> {
                 average_strategy
             }
 
-            Showdown => {
-                self.evaluate_showdown(opponent_range, evaluator, updating_player, communal_cards)
-            }
+            Showdown => self.evaluate_showdown(opponent_range, evaluator, communal_cards),
             SBWins => self.evaluate_fold(opponent_range, evaluator, updating_player, Big),
             BBWins => self.evaluate_fold(opponent_range, evaluator, updating_player, Small),
             Flop => {
@@ -498,7 +495,6 @@ impl<const M: usize> State<M> {
         &self,
         opponent_range: &Vector,
         evaluator: &Evaluator<M>,
-        updating_player: Player,
         communal_cards: u64,
     ) -> Vector {
         let mut result = Vector::default();
