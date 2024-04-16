@@ -58,7 +58,8 @@ struct __align__(32) State {
 
 struct Builder {
     int current_index;
-    State *states;
+    State *device_states;
+    AbstractVector *memory_abstract_vectors;
     AbstractVector *abstract_vectors;
     AbstractVector *updates;
     Vector *communication;

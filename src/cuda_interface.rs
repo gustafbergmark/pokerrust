@@ -10,6 +10,10 @@ extern "C" {
 
     fn upload_c(builder: *const std::ffi::c_void, index: i32, v: *const Float);
     fn download_c(builder: *const std::ffi::c_void, index: i32, v: *mut Float);
+
+    fn upload_strategy_c(builder: *const std::ffi::c_void, index: i32);
+    fn download_strategy_c(builder: *const std::ffi::c_void, index: i32);
+
     fn build_river_cuda(cards: u64, bet: Float, builder: *const std::ffi::c_void) -> i32;
     fn transfer_flop_eval_cuda(
         flop: u64,
@@ -38,6 +42,13 @@ pub fn download_gpu(builder: Pointer, index: i32) -> Vector {
     let mut result = Vector::default();
     unsafe { download_c(builder.0, index, result.values.as_mut_ptr()) };
     result
+}
+
+pub fn upload_strategy_gpu(builder: Pointer, index: i32) {
+    unsafe { upload_strategy_c(builder.0, index) }
+}
+pub fn download_strategy_gpu(builder: Pointer, index: i32) {
+    unsafe { download_strategy_c(builder.0, index) }
 }
 pub fn initialize_builder() -> Pointer {
     Pointer(unsafe { init_builder() })

@@ -28,7 +28,7 @@ void evaluate_cuda(Builder *builder,
 //        printf("%d %f\n", i, builder->communication[0].values[i]);
 //    }
 //    fflush(stdout);
-    evaluate_all<<< 63 * 49 * 9, TPB>>>(builder->opponent_ranges, builder->results, builder->states, evaluator,
+    evaluate_all<<< 63 * 49 * 9, TPB>>>(builder->opponent_ranges, builder->results, builder->device_states, evaluator,
                                         updating_player == 0 ? Small : Big, calc_exploit, device_scratch);
     cudaDeviceSynchronize();
     err = cudaGetLastError();
@@ -36,7 +36,7 @@ void evaluate_cuda(Builder *builder,
         printf("Main execution error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
     }
-    apply_updates<<<63 * 9, TPB>>>(builder->states, updating_player == 0 ? Small : Big);
+    apply_updates<<<63 * 9, TPB>>>(builder->device_states, updating_player == 0 ? Small : Big);
     cudaDeviceSynchronize();
     err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -79,7 +79,8 @@ void free_eval_cuda(Evaluator *device_eval) {
 Builder *init_builder() {
     Builder *builder = (Builder *) calloc(1, sizeof(Builder));
     builder->current_index = 0;
-    cudaMalloc(&builder->states, 63 * 9 * 28 * sizeof(State));
+    cudaMalloc(&builder->device_states, 63 * 9 * 28 * sizeof(State));
+    builder->memory_abstract_vectors = (AbstractVector *) calloc(63 * 9 * 26 * 1755, sizeof(AbstractVector));
     cudaMalloc(&builder->abstract_vectors, 63 * 9 * 26 * sizeof(AbstractVector));
     cudaMalloc(&builder->updates, 63 * 9 * 26 * sizeof(AbstractVector));
     cudaMemset(builder->abstract_vectors, 0, 63 * 26 * 9 * sizeof(AbstractVector));
@@ -99,6 +100,16 @@ void download_c(Builder *builder, int index, DataType *vector) {
     memcpy(vector, builder->communication + index, 1326 * sizeof(DataType));
 }
 
+void upload_strategy_c(Builder *builder, int index) {
+    cudaMemcpy(builder->abstract_vectors, &builder->memory_abstract_vectors[index],
+               63 * 9 * 26 * sizeof(AbstractVector), cudaMemcpyHostToDevice);
+}
+
+void download_strategy_c(Builder *builder, int index) {
+    cudaMemcpy(&builder->memory_abstract_vectors[index], builder->abstract_vectors,
+               63 * 9 * 26 * sizeof(AbstractVector), cudaMemcpyDeviceToHost);
+}
+
 int build_river_cuda(long cards, DataType bet, Builder *builder) {
     cudaError_t err;
     int start = builder->current_index;
@@ -107,9 +118,10 @@ int build_river_cuda(long cards, DataType bet, Builder *builder) {
     int state_size = sizeof(State) * (28);
     State *root = (State *) malloc(state_size);
 
-    State *device_root = builder->states + builder->current_index * 28;
-    AbstractVector *abstract_vectors = builder->abstract_vectors + builder->current_index * 26;
-    AbstractVector *updates = builder->updates + builder->current_index * 26;
+    State *device_root = builder->device_states + (builder->current_index % 567) * 28;
+    AbstractVector *memory_abstract_vectors = builder->memory_abstract_vectors + builder->current_index * 26;
+    AbstractVector *abstract_vectors = builder->abstract_vectors + (builder->current_index % 567) * 26;
+    AbstractVector *updates = builder->updates + (builder->current_index % 567) * 26;
     builder->current_index += 1;
 
     build_river(cards, bet, root, device_root, &state_index, abstract_vectors, updates,
@@ -124,6 +136,7 @@ int build_river_cuda(long cards, DataType bet, Builder *builder) {
 //    printf("index: %d\n", start); // 567
 //    printf("vector index: %d\n", abstract_vector_index);
 //    fflush(stdout);
-    return start;
+    free(root);
+    return start % 567;
 }
 }

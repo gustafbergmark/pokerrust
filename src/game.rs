@@ -1,4 +1,6 @@
-use crate::cuda_interface::{evaluate_gpu, free_eval, transfer_flop_eval};
+use crate::cuda_interface::{
+    download_strategy_gpu, evaluate_gpu, free_eval, transfer_flop_eval, upload_strategy_gpu,
+};
 use crate::enums::Player::{Big, Small};
 use crate::evaluator::Evaluator;
 use crate::state::{Pointer, State};
@@ -30,16 +32,27 @@ impl<const M: usize> Game<M> {
     }
 
     pub fn perform_iter(&mut self, iter: usize) {
-        let mut flops = self.evaluator.flops.clone();
+        let mut flops = self
+            .evaluator
+            .flops
+            .clone()
+            .into_iter()
+            .enumerate()
+            .collect::<Vec<_>>();
         flops.shuffle(&mut thread_rng());
-        for flop in flops {
+        for (index, flop) in flops {
             println!(
                 "Starting iteration on fixed flop {:?}",
                 self.evaluator.u64_to_cards(flop)
             );
             let _start = Instant::now();
             self.evaluator.get_flop_eval(flop);
+            println!(
+                "Flop eval created in in {}s",
+                _start.elapsed().as_secs_f32()
+            );
             let eval_ptr = Pointer(transfer_flop_eval(&self.evaluator, flop));
+            upload_strategy_gpu(self.builder, index as i32);
 
             if cfg!(feature = "GPU") {
                 let _ = self.root.evaluate_state(
@@ -167,6 +180,7 @@ impl<const M: usize> Game<M> {
             //     );
             // }
             free_eval(eval_ptr);
+            download_strategy_gpu(self.builder, index as i32);
         }
     }
 }

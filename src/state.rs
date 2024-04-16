@@ -386,7 +386,9 @@ impl<const M: usize> State<M> {
                     count += 1;
                 }
                 // Apply the aggregated updates from all iteration on the abstract strategy
-                next_state.apply_updates(updating_player);
+                if !upload && !calc_exploit {
+                    next_state.apply_updates(updating_player);
+                }
                 assert_eq!(count, 49);
                 total * (1.0 / 49.0)
             }
