@@ -13,7 +13,8 @@ use std::time::Instant;
 pub(crate) fn fixed_flop_poker<const M: usize>() -> Game<M> {
     let mut root = State::new(NonTerminal, DealHole, 0.5, 1.0, Small);
     let start = Instant::now();
-    let evaluator = Evaluator::new();
+    let mut evaluator = Evaluator::new();
+    evaluator.get_flop_eval(7);
     println!(
         "Evaluator created in {} seconds",
         start.elapsed().as_secs_f32()

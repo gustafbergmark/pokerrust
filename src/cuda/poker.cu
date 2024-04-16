@@ -458,9 +458,7 @@ __device__ void evaluate_river(Vector *opponent_range,
                             } else {
                                 average_abstract[depth] += average_abstract[depth + 1] * regret / strat_sums[depth];
                             }
-                            // We add the util to the regrets here, as it won't be read again this iteration, and we don't
-                            // have to store the utility until later.
-                            state->updates[transition - 1]->values[tid] += average_abstract[depth + 1];
+                            atomicAdd(&state->updates[transition - 1]->values[tid], average_abstract[depth + 1]);
                         } else {
                             for (int b = 0; b < ITERS; b++) {
                                 int index = tid + TPB * b;
@@ -480,7 +478,7 @@ __device__ void evaluate_river(Vector *opponent_range,
                     if ((state->next_to_act == updating_player) && !calc_exploit) {
                         // update strategy and remove the utility of the average strategy
                         for (int k = 0; k < transitions; k++) {
-                            state->updates[k]->values[tid] -= average_abstract[depth];
+                            atomicAdd(&state->updates[k]->values[tid], -average_abstract[depth]);
                         }
                     }
                     state = state->parent;
@@ -521,10 +519,11 @@ __device__ void evaluate_river(Vector *opponent_range,
     }
 }
 
-__device__ void apply_updates(State *root_state,
-                               Player updating_player) {
-    __syncthreads();
-    State *state = root_state;
+__global__ void apply_updates(State *root_states,
+                              Player updating_player) {
+    int block = blockIdx.x;
+    State *root = root_states + 28 * block;
+    State *state = root->next_states[0];
     int tid = threadIdx.x;
     // Every 2 bits signifies the transition count at a specific depth
     int transition_state = 0;
@@ -578,27 +577,37 @@ __global__ void evaluate_all(Vector *opponent_ranges, Vector *results, State *ro
     int block = blockIdx.x;
     Vector *opponent_range = opponent_ranges + block;
     Vector *result = results + block;
-    State *state = root_states + 28 * block;
+    State *state = root_states + 28 * (block / 49);
     Vector *scratch = scratches + 10 * block;
     State *next = state->next_states[0];
+
+    // Hacky way of finding turn card
+    int turn_index = block % 49;
+    long turn = 0;
+    for (int i = 0; (i < turn_index) || ((1l << turn) & evaluator->flop); turn++) {
+        if (!((1l << turn) & evaluator->flop)) {
+            i++;
+        }
+    }
+    //if (turn != (turn_index + 3)) printf("WADDAHEK %d %d\n", turn, turn_index);
+    turn = 1l << turn;
+    long cards = evaluator->flop | turn;
+
     for (int c = 0; c < 52; c++) {
         long river = 1l << c;
-        if (river & state->cards) continue;
+        if (river & cards) continue;
         Vector *new_range = scratch;
         copy(opponent_range, new_range);
-        remove_collisions(new_range, river | state->cards);
-        long set = (state->cards | river) ^ evaluator->flop;
+        remove_collisions(new_range, river | cards);
+        long set = turn | river;
         int eval_index = get_index(set);
         short *eval = evaluator->eval + eval_index * (1326 + 256 * 2);
         short *coll_vec = evaluator->coll_vec + eval_index * 52 * 51;
-        evaluate_river(new_range, next, scratch + 1, state->cards | river, evaluator->card_indexes, eval,
+        evaluate_river(new_range, next, scratch + 1, cards | river, evaluator->card_indexes, eval,
                        coll_vec, evaluator->abstractions + eval_index * 1326,
                        updating_player, calc_exploit);
-        remove_collisions(scratch + 1, river | state->cards);
+        remove_collisions(scratch + 1, river | cards);
         add_assign(result, scratch + 1);
-    }
-    if(!calc_exploit) {
-        apply_updates(next, updating_player);
     }
     divide(result, 48.0f);
     //remove_collisions(result, state->cards);

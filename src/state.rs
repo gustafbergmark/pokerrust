@@ -10,8 +10,6 @@ use crate::vector::{Float, Vector};
 use itertools::Itertools;
 use poker::Suit::*;
 use poker::{Card, Suit};
-use rayon::iter::IntoParallelRefMutIterator;
-use rayon::iter::ParallelIterator;
 use std::collections::HashSet;
 use std::ffi::c_void;
 use std::iter::zip;
@@ -182,19 +180,17 @@ impl<const M: usize> State<M> {
             }
             DealTurn => {
                 let deck = Card::generate_deck();
-                let mut next_states = Vec::new();
                 for turn in deck {
                     let num_turn = evaluator.cards_to_u64(&[turn]);
                     if num_turn & self.cards > 0 {
                         continue;
                     }
-                    let mut next_state = state.clone();
-                    next_state.terminal = NonTerminal;
-                    next_state.cards = self.cards | num_turn;
-                    next_state.next_to_act = Small;
-                    next_states.push(next_state);
+                    state.terminal = NonTerminal;
+                    state.cards = self.cards | num_turn;
+                    state.card_strategies = Strategy::Abstract(AbstractStrategy::new());
+                    state.next_to_act = Small;
+                    break;
                 }
-                return next_states;
             }
             DealRiver => {
                 let deck = Card::generate_deck();
@@ -226,6 +222,7 @@ impl<const M: usize> State<M> {
         communal_cards: u64,
         builder: Pointer,
         upload: bool,
+        turn_index: i32,
     ) -> Vector {
         //(util of sb, util of bb, exploitability of updating player)
         let opponent_range = match updating_player {
@@ -256,6 +253,7 @@ impl<const M: usize> State<M> {
                             communal_cards,
                             builder,
                             upload,
+                            turn_index,
                         ),
 
                         Big => next.evaluate_state(
@@ -267,6 +265,7 @@ impl<const M: usize> State<M> {
                             communal_cards,
                             builder,
                             upload,
+                            turn_index,
                         ),
                     };
 
@@ -320,6 +319,7 @@ impl<const M: usize> State<M> {
                         next_state.cards,
                         builder,
                         upload,
+                        turn_index,
                     );
                     // For safety for the future
                     for i in 0..1326 {
@@ -336,56 +336,63 @@ impl<const M: usize> State<M> {
             }
             Turn => {
                 let mut total = Vector::default();
-                let res = self
-                    .next_states
-                    .par_iter_mut()
-                    //.iter_mut()
-                    .map(|next_state| {
-                        let mut new_sb_range = *sb_range;
-                        let mut new_bb_range = *bb_range;
-                        // It is impossible to have hands which contains flop cards
-                        for i in 0..1326 {
-                            if (evaluator.card_order()[i] & next_state.cards) > 0 {
-                                new_sb_range[i] = 0.0;
-                                new_bb_range[i] = 0.0;
-                            }
+                assert_eq!(self.next_states.len(), 1);
+                let next_state = &mut self.next_states[0];
+                let mut count = 0;
+                for turn_card in 0..52 {
+                    let num_turn = 1 << turn_card;
+                    if num_turn & communal_cards > 0 {
+                        continue;
+                    }
+                    let new_cards = communal_cards | num_turn;
+                    let mut new_sb_range = *sb_range;
+                    let mut new_bb_range = *bb_range;
+                    // It is impossible to have hands which contains flop cards
+                    for i in 0..1326 {
+                        if (evaluator.card_order()[i] & new_cards) > 0 {
+                            new_sb_range[i] = 0.0;
+                            new_bb_range[i] = 0.0;
                         }
-                        let mut res = next_state.evaluate_state(
-                            &new_sb_range,
-                            &new_bb_range,
-                            evaluator,
-                            updating_player,
-                            calc_exploit,
-                            next_state.cards,
-                            builder,
-                            upload,
-                        );
-                        for i in 0..1326 {
-                            if (evaluator.card_order()[i] & next_state.cards) > 0 {
-                                res[i] = 0.0;
-                            }
+                    }
+                    let mut res = next_state.evaluate_state(
+                        &new_sb_range,
+                        &new_bb_range,
+                        evaluator,
+                        updating_player,
+                        calc_exploit,
+                        new_cards,
+                        builder,
+                        upload,
+                        count,
+                    );
+                    for i in 0..1326 {
+                        if (evaluator.card_order()[i] & new_cards) > 0 {
+                            res[i] = 0.0;
                         }
-                        res
-                    })
-                    .collect::<Vec<_>>();
-                for val in res {
-                    total += val;
+                    }
+                    total += res;
+                    count += 1;
                 }
-
-                total * (1.0 / (self.next_states.len() as Float))
+                // Apply the aggregated updates from all iteration on the abstract strategy
+                next_state.apply_updates(updating_player);
+                assert_eq!(count, 49);
+                total * (1.0 / 49.0)
             }
             River => {
                 if cfg!(feature = "GPU") {
                     if upload {
                         upload_gpu(
                             builder,
-                            self.gpu_pointer.expect("Missing GPU index"),
+                            self.gpu_pointer.expect("Missing GPU index") * 49 + turn_index,
                             opponent_range,
                         );
                         // No updates during upload, return does not matter
                         Vector::default()
                     } else {
-                        download_gpu(builder, self.gpu_pointer.expect("Missing GPU index"))
+                        download_gpu(
+                            builder,
+                            self.gpu_pointer.expect("Missing GPU index") * 49 + turn_index,
+                        )
                     }
                 } else {
                     let mut total = Vector::default();
@@ -417,6 +424,7 @@ impl<const M: usize> State<M> {
                             new_cards,
                             builder,
                             upload,
+                            turn_index,
                         );
                         for i in 0..1326 {
                             if (evaluator.card_order()[i] & new_cards) > 0 {
@@ -426,7 +434,7 @@ impl<const M: usize> State<M> {
                         total += res;
                     }
                     // Apply the aggregated updates from all iteration on the abstract strategy
-                    next_state.apply_updates(updating_player);
+                    // next_state.apply_updates(updating_player);
                     assert_eq!(count, 48);
                     total * (1.0 / 48.0)
                 }
@@ -434,22 +442,16 @@ impl<const M: usize> State<M> {
         }
     }
     pub fn apply_updates(&mut self, updating_player: Player) {
-        match self.terminal {
-            NonTerminal => {
-                match &mut self.card_strategies {
-                    Strategy::Regular(_) => {}
-                    Strategy::Abstract(strat) => {
-                        if self.next_to_act == updating_player {
-                            strat.apply_updates();
-                        }
-                    }
-                }
-                for next in self.next_states.iter_mut() {
-                    next.apply_updates(updating_player);
+        match &mut self.card_strategies {
+            Strategy::Regular(_) => {}
+            Strategy::Abstract(strat) => {
+                if self.next_to_act == updating_player {
+                    strat.apply_updates();
                 }
             }
-
-            _ => {}
+        }
+        for next in self.next_states.iter_mut() {
+            next.apply_updates(updating_player);
         }
     }
 

@@ -42,6 +42,7 @@ impl<const M: usize> Game<M> {
                 0,
                 self.builder,
                 true,
+                0,
             );
             evaluate_gpu(self.builder, eval_ptr, Small, false);
         }
@@ -54,6 +55,7 @@ impl<const M: usize> Game<M> {
             0,
             self.builder,
             false,
+            0,
         );
         //println!("Iteration time: {}s", _start.elapsed().as_secs_f32());
 
@@ -67,6 +69,7 @@ impl<const M: usize> Game<M> {
                 0,
                 self.builder,
                 true,
+                0,
             );
             evaluate_gpu(self.builder, eval_ptr, Big, false);
         }
@@ -80,6 +83,7 @@ impl<const M: usize> Game<M> {
             0,
             self.builder,
             false,
+            0,
         );
         let iter_time = _start.elapsed().as_secs_f32();
         if iter % 10 == 0 {
@@ -93,6 +97,7 @@ impl<const M: usize> Game<M> {
                     0,
                     self.builder,
                     true,
+                    0,
                 );
                 evaluate_gpu(self.builder, eval_ptr, Small, true);
             }
@@ -105,6 +110,7 @@ impl<const M: usize> Game<M> {
                 0,
                 self.builder,
                 false,
+                0,
             );
             if cfg!(feature = "GPU") {
                 let _ = self.root.evaluate_state(
@@ -116,6 +122,7 @@ impl<const M: usize> Game<M> {
                     0,
                     self.builder,
                     true,
+                    0,
                 );
                 evaluate_gpu(self.builder, eval_ptr, Big, true);
             }
@@ -128,6 +135,7 @@ impl<const M: usize> Game<M> {
                 0,
                 self.builder,
                 false,
+                0,
             );
             println!(
                 "Iteration {} done \n\

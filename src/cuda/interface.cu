@@ -36,6 +36,13 @@ void evaluate_cuda(Builder *builder,
         printf("Main execution error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
     }
+    apply_updates<<<63 * 9, TPB>>>(builder->states, updating_player == 0 ? Small : Big);
+    cudaDeviceSynchronize();
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("Apply update error: %s\n", cudaGetErrorString(err));
+        fflush(stdout);
+    }
     cudaMemcpy(builder->communication, builder->results, 63 * 49 * 9 * sizeof(Vector), cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
     cudaFree(device_scratch);
@@ -72,10 +79,10 @@ void free_eval_cuda(Evaluator *device_eval) {
 Builder *init_builder() {
     Builder *builder = (Builder *) calloc(1, sizeof(Builder));
     builder->current_index = 0;
-    cudaMalloc(&builder->states, 63 * 49 * 9 * 28 * sizeof(State));
-    cudaMalloc(&builder->abstract_vectors, 63 * 49 * 9 * 26 * sizeof(AbstractVector));
-    cudaMalloc(&builder->updates, 63 * 49 * 9 * 26 * sizeof(AbstractVector));
-    cudaMemset(builder->abstract_vectors, 0, 63 * 49 * 26 * 9 * sizeof(AbstractVector));
+    cudaMalloc(&builder->states, 63 * 9 * 28 * sizeof(State));
+    cudaMalloc(&builder->abstract_vectors, 63 * 9 * 26 * sizeof(AbstractVector));
+    cudaMalloc(&builder->updates, 63 * 9 * 26 * sizeof(AbstractVector));
+    cudaMemset(builder->abstract_vectors, 0, 63 * 26 * 9 * sizeof(AbstractVector));
     cudaMallocHost(&builder->communication, 63 * 49 * 9 * sizeof(Vector));
     cudaMalloc(&builder->opponent_ranges, 63 * 49 * 9 * sizeof(Vector));
     cudaMalloc(&builder->results, 63 * 49 * 9 * sizeof(Vector));
@@ -114,7 +121,7 @@ int build_river_cuda(long cards, DataType bet, Builder *builder) {
         printf("Build error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
     }
-//    printf("index: %d\n", start);
+//    printf("index: %d\n", start); // 567
 //    printf("vector index: %d\n", abstract_vector_index);
 //    fflush(stdout);
     return start;
