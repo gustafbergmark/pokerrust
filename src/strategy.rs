@@ -84,8 +84,8 @@ impl RegularStrategy {
 // holds historic winnings of each move and hand
 #[derive(Clone, PartialEq)]
 pub(crate) struct AbstractStrategy<const M: usize> {
-    regrets: Vec<[Float; M]>,
-    updates: Vec<[Float; M]>,
+    regrets: Vec<Vec<Float>>,
+    updates: Vec<Vec<Float>>,
 }
 
 impl<const M: usize> Debug for AbstractStrategy<M> {
@@ -103,11 +103,14 @@ impl<const M: usize> AbstractStrategy<M> {
     }
 
     pub fn add_strategy(&mut self) {
-        self.regrets.push([Float::default(); M]);
-        self.updates.push([Float::default(); M]);
+        self.regrets.push(vec![0.0; M]);
     }
 
     pub fn update_add(&mut self, updates: &Vec<Vector>, evaluator: &Evaluator<M>, cards: u64) {
+        // Allocate only when this subgame is in focus
+        if self.updates.is_empty() {
+            self.updates = vec![vec![0.0; M]; self.regrets.len()]
+        }
         let abstraction = evaluator.abstractions(cards);
         for i in 0..1326 {
             let abstract_index = abstraction[i] as usize;
@@ -149,5 +152,7 @@ impl<const M: usize> AbstractStrategy<M> {
                 self.updates[k][i] = 0.0;
             }
         }
+        // Deallocate update memory
+        self.updates = vec![];
     }
 }

@@ -141,7 +141,8 @@ impl<const M: usize> State<M> {
             DealFlop => {
                 let deck = Card::generate_deck();
                 //let flops = deck.combinations(3); // Full game
-                let flops = deck.take(3).combinations(3); // Fixed flop game
+                //let flops = deck.take(3).combinations(3); // Fixed flop game
+                let flops = deck.combinations(3); // Fixed flop game
                 let mut set: HashSet<u64> = HashSet::new();
                 let mut next_states = Vec::new();
                 for flop in flops {
@@ -193,6 +194,10 @@ impl<const M: usize> State<M> {
                 }
             }
             DealRiver => {
+                // Do not create river subgames on CPU if they are created on GPU
+                if cfg!(feature = "GPU") {
+                    return vec![];
+                }
                 let deck = Card::generate_deck();
                 // A bit of a hack, need 5 cards for building, but the last card added is symbolic only
                 for river in deck {
