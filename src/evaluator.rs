@@ -1,7 +1,8 @@
 use crate::combination_map::CombinationMap;
 use itertools::Itertools;
-use poker::{box_cards, Card};
-use std::collections::HashMap;
+use poker::Suit::{Clubs, Diamonds, Hearts, Spades};
+use poker::{box_cards, Card, Suit};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
 pub struct Evaluator<const M: usize> {
@@ -9,6 +10,7 @@ pub struct Evaluator<const M: usize> {
     // for each gpu thread and last 256 is end next group index for each gpu thread
     card_order: Vec<u64>,
     card_indexes: Vec<u16>,
+    pub flops: Vec<u64>,
     vectorized_eval: CombinationMap<Vec<u16>, 52, 5>,
     collisions: CombinationMap<Vec<u16>, 52, 5>,
     river_abstractions: CombinationMap<Vec<u16>, 52, 5>,
@@ -54,9 +56,40 @@ impl<const M: usize> Evaluator<M> {
         }
         assert_eq!(card_indexes.len(), 51 * 52);
 
+        let mut flops = vec![];
+        let mut set: HashSet<u64> = HashSet::new();
+        for flop in Card::generate_deck().combinations(3) {
+            let num_flop = Self::cards_to_u64_inner(&flop, &card_nums);
+            if set.contains(&num_flop) {
+                continue;
+            }
+            let mut possible_permutations: Vec<[Suit; 4]> = vec![];
+            let permutations = [Clubs, Hearts, Spades, Diamonds]
+                .into_iter()
+                .permutations(4);
+            for permutation in permutations {
+                let mut perm_flop = flop.clone();
+                for card in perm_flop.iter_mut() {
+                    let new_suit = match card.suit() {
+                        Clubs => permutation[0],
+                        Hearts => permutation[1],
+                        Spades => permutation[2],
+                        Diamonds => permutation[3],
+                    };
+                    *card = Card::new(card.rank(), new_suit);
+                }
+                let hand = Self::cards_to_u64_inner(&perm_flop, &card_nums);
+                if set.insert(hand) {
+                    possible_permutations.push(permutation.try_into().unwrap())
+                }
+            }
+            flops.push(Self::cards_to_u64_inner(&flop, &card_nums));
+        }
+
         Evaluator {
             card_order,
             card_indexes,
+            flops,
             vectorized_eval: CombinationMap::new(),
             collisions: CombinationMap::new(),
             river_abstractions: CombinationMap::new(),

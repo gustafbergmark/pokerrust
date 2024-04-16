@@ -3,6 +3,8 @@ use crate::enums::Player::{Big, Small};
 use crate::evaluator::Evaluator;
 use crate::state::{Pointer, State};
 use crate::vector::Vector;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use std::fmt::{Debug, Formatter};
 use std::time::Instant;
 
@@ -28,126 +30,143 @@ impl<const M: usize> Game<M> {
     }
 
     pub fn perform_iter(&mut self, iter: usize) {
-        let _start = Instant::now();
-        // 7 is the fixed flop
-        let eval_ptr = Pointer(transfer_flop_eval(&self.evaluator, 7));
-
-        if cfg!(feature = "GPU") {
-            let _ = self.root.evaluate_state(
-                &Vector::ones(),
-                &Vector::ones(),
-                &self.evaluator,
-                Small,
-                false,
-                0,
-                self.builder,
-                true,
-                0,
+        let mut flops = self.evaluator.flops.clone();
+        flops.shuffle(&mut thread_rng());
+        for flop in flops {
+            println!(
+                "Starting iteration on fixed flop {:?}",
+                self.evaluator.u64_to_cards(flop)
             );
-            evaluate_gpu(self.builder, eval_ptr, Small, false);
-        }
-        let _ = self.root.evaluate_state(
-            &Vector::ones(),
-            &Vector::ones(),
-            &self.evaluator,
-            Small,
-            false,
-            0,
-            self.builder,
-            false,
-            0,
-        );
-        //println!("Iteration time: {}s", _start.elapsed().as_secs_f32());
+            let _start = Instant::now();
+            self.evaluator.get_flop_eval(flop);
+            let eval_ptr = Pointer(transfer_flop_eval(&self.evaluator, flop));
 
-        if cfg!(feature = "GPU") {
-            let _ = self.root.evaluate_state(
-                &Vector::ones(),
-                &Vector::ones(),
-                &self.evaluator,
-                Big,
-                false,
-                0,
-                self.builder,
-                true,
-                0,
-            );
-            evaluate_gpu(self.builder, eval_ptr, Big, false);
-        }
-
-        let _ = self.root.evaluate_state(
-            &Vector::ones(),
-            &Vector::ones(),
-            &self.evaluator,
-            Big,
-            false,
-            0,
-            self.builder,
-            false,
-            0,
-        );
-        let iter_time = _start.elapsed().as_secs_f32();
-        if iter % 10 == 0 {
             if cfg!(feature = "GPU") {
                 let _ = self.root.evaluate_state(
                     &Vector::ones(),
                     &Vector::ones(),
                     &self.evaluator,
                     Small,
-                    true,
+                    false,
                     0,
                     self.builder,
                     true,
                     0,
+                    flop,
                 );
-                evaluate_gpu(self.builder, eval_ptr, Small, true);
+                evaluate_gpu(self.builder, eval_ptr, Small, false);
             }
-            let exp_sb = self.root.evaluate_state(
+            let _ = self.root.evaluate_state(
                 &Vector::ones(),
                 &Vector::ones(),
                 &self.evaluator,
                 Small,
-                true,
+                false,
                 0,
                 self.builder,
                 false,
                 0,
+                flop,
             );
+
             if cfg!(feature = "GPU") {
                 let _ = self.root.evaluate_state(
                     &Vector::ones(),
                     &Vector::ones(),
                     &self.evaluator,
                     Big,
-                    true,
+                    false,
                     0,
                     self.builder,
                     true,
                     0,
+                    flop,
                 );
-                evaluate_gpu(self.builder, eval_ptr, Big, true);
+                evaluate_gpu(self.builder, eval_ptr, Big, false);
             }
-            let exp_bb = self.root.evaluate_state(
+
+            let _ = self.root.evaluate_state(
                 &Vector::ones(),
                 &Vector::ones(),
                 &self.evaluator,
                 Big,
-                true,
+                false,
                 0,
                 self.builder,
                 false,
                 0,
+                flop,
             );
-            println!(
-                "Iteration {} done \n\
-                  Exploitability: {} mb/h \n\
-                  Iter time: {} \n\
-                  Exploit calc time: {} \n",
-                iter,
-                (exp_sb.sum() + exp_bb.sum()) * 1000.0 / 1326.0 / 1255.0 / 2.0, // 1000 for milli, 1326 for own hands, 1255 for opponent, 2 for two strategies
-                iter_time,
-                _start.elapsed().as_secs_f32() - iter_time,
-            );
+            println!("Iteration time: {}s", _start.elapsed().as_secs_f32());
+            // Exploitability calculation must be redone for public chance sampling
+            // let iter_time = _start.elapsed().as_secs_f32();
+            // if iter % 10 == 0 {
+            //     if cfg!(feature = "GPU") {
+            //         let _ = self.root.evaluate_state(
+            //             &Vector::ones(),
+            //             &Vector::ones(),
+            //             &self.evaluator,
+            //             Small,
+            //             true,
+            //             0,
+            //             self.builder,
+            //             true,
+            //             0,
+            //             flop,
+            //         );
+            //         evaluate_gpu(self.builder, eval_ptr, Small, true);
+            //     }
+            //     let exp_sb = self.root.evaluate_state(
+            //         &Vector::ones(),
+            //         &Vector::ones(),
+            //         &self.evaluator,
+            //         Small,
+            //         true,
+            //         0,
+            //         self.builder,
+            //         false,
+            //         0,
+            //         flop,
+            //     );
+            //     if cfg!(feature = "GPU") {
+            //         let _ = self.root.evaluate_state(
+            //             &Vector::ones(),
+            //             &Vector::ones(),
+            //             &self.evaluator,
+            //             Big,
+            //             true,
+            //             0,
+            //             self.builder,
+            //             true,
+            //             0,
+            //             flop,
+            //         );
+            //         evaluate_gpu(self.builder, eval_ptr, Big, true);
+            //     }
+            //     let exp_bb = self.root.evaluate_state(
+            //         &Vector::ones(),
+            //         &Vector::ones(),
+            //         &self.evaluator,
+            //         Big,
+            //         true,
+            //         0,
+            //         self.builder,
+            //         false,
+            //         0,
+            //         flop,
+            //     );
+            //     println!(
+            //         "Iteration {} done \n\
+            //       Exploitability: {} mb/h \n\
+            //       Iter time: {} \n\
+            //       Exploit calc time: {} \n",
+            //         iter,
+            //         (exp_sb.sum() + exp_bb.sum()) * 1000.0 / 1326.0 / 1255.0 / 2.0, // 1000 for milli, 1326 for own hands, 1255 for opponent, 2 for two strategies
+            //         iter_time,
+            //         _start.elapsed().as_secs_f32() - iter_time,
+            //     );
+            // }
+            free_eval(eval_ptr);
         }
-        free_eval(eval_ptr);
     }
 }

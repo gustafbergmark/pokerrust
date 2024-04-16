@@ -228,6 +228,7 @@ impl<const M: usize> State<M> {
         builder: Pointer,
         upload: bool,
         turn_index: i32,
+        fixed_flop: u64,
     ) -> Vector {
         //(util of sb, util of bb, exploitability of updating player)
         let opponent_range = match updating_player {
@@ -259,6 +260,7 @@ impl<const M: usize> State<M> {
                             builder,
                             upload,
                             turn_index,
+                            fixed_flop,
                         ),
 
                         Big => next.evaluate_state(
@@ -271,6 +273,7 @@ impl<const M: usize> State<M> {
                             builder,
                             upload,
                             turn_index,
+                            fixed_flop,
                         ),
                     };
 
@@ -306,35 +309,38 @@ impl<const M: usize> State<M> {
                 let mut total = Vector::default();
                 let mut count = 0.0;
                 for next_state in self.next_states.iter_mut() {
-                    let mut new_sb_range = *sb_range;
-                    let mut new_bb_range = *bb_range;
-                    // It is impossible to have hands which contains flop cards
-                    for i in 0..1326 {
-                        if (evaluator.card_order()[i] & next_state.cards) > 0 {
-                            new_sb_range[i] = 0.0;
-                            new_bb_range[i] = 0.0;
+                    if next_state.cards == fixed_flop || fixed_flop == 0 {
+                        let mut new_sb_range = *sb_range;
+                        let mut new_bb_range = *bb_range;
+                        // It is impossible to have hands which contains flop cards
+                        for i in 0..1326 {
+                            if (evaluator.card_order()[i] & next_state.cards) > 0 {
+                                new_sb_range[i] = 0.0;
+                                new_bb_range[i] = 0.0;
+                            }
                         }
-                    }
-                    let mut res = next_state.evaluate_state(
-                        &new_sb_range,
-                        &new_bb_range,
-                        evaluator,
-                        updating_player,
-                        calc_exploit,
-                        next_state.cards,
-                        builder,
-                        upload,
-                        turn_index,
-                    );
-                    // For safety for the future
-                    for i in 0..1326 {
-                        if (evaluator.card_order()[i] & next_state.cards) > 0 {
-                            res[i] = 0.0;
+                        let mut res = next_state.evaluate_state(
+                            &new_sb_range,
+                            &new_bb_range,
+                            evaluator,
+                            updating_player,
+                            calc_exploit,
+                            next_state.cards,
+                            builder,
+                            upload,
+                            turn_index,
+                            fixed_flop,
+                        );
+                        // For safety for the future
+                        for i in 0..1326 {
+                            if (evaluator.card_order()[i] & next_state.cards) > 0 {
+                                res[i] = 0.0;
+                            }
                         }
-                    }
-                    for &permutation in &next_state.permutations {
-                        count += 1.0;
-                        total += permute(permutation, res, evaluator)
+                        for &permutation in &next_state.permutations {
+                            count += 1.0;
+                            total += permute(permutation, res, evaluator)
+                        }
                     }
                 }
                 total * (1.0 / count)
@@ -369,6 +375,7 @@ impl<const M: usize> State<M> {
                         builder,
                         upload,
                         count,
+                        fixed_flop,
                     );
                     for i in 0..1326 {
                         if (evaluator.card_order()[i] & new_cards) > 0 {
@@ -430,6 +437,7 @@ impl<const M: usize> State<M> {
                             builder,
                             upload,
                             turn_index,
+                            fixed_flop,
                         );
                         for i in 0..1326 {
                             if (evaluator.card_order()[i] & new_cards) > 0 {
