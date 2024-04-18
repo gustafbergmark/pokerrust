@@ -297,7 +297,7 @@ fn phs(evaluation: &Vec<u16>, card_order: &Vec<u64>, communal_cards: u64) -> Vec
     let mut collisions = [0; 52];
 
     let mut cumulative = 0;
-    let mut result: Vec<u32> = vec![0; 1326];
+    let mut result: Vec<i32> = vec![0; 1326];
     // Doubled integers to not have to divide by 2 in current_collisions
     for group in groups.iter() {
         let mut current_cumulative = 0;
@@ -324,9 +324,9 @@ fn phs(evaluation: &Vec<u16>, card_order: &Vec<u64>, communal_cards: u64) -> Vec
             }
             let card = separate_cards(cards);
             // +1 because inclusion exclusion
-            result[index] += current_cumulative + 1;
+            result[index] += current_cumulative / 2 + 1;
             for c in card {
-                result[index] -= current_collisions[c];
+                result[index] -= current_collisions[c] / 2;
             }
         }
         cumulative += current_cumulative;
@@ -337,6 +337,7 @@ fn phs(evaluation: &Vec<u16>, card_order: &Vec<u64>, communal_cards: u64) -> Vec
     // 5 communal cards, 2 on own hand leads to 45 choose 2 opponent hands
     let mut res = vec![];
     for elem in result {
+        assert!(elem >= 0 && elem <= 990 * 2);
         res.push((elem as f32) / (990.0 * 2.0));
     }
     res

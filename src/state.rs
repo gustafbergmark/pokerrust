@@ -4,6 +4,7 @@ use crate::enums::Player::*;
 use crate::enums::TerminalState::*;
 use crate::enums::*;
 use crate::evaluator::{separate_cards, Evaluator};
+use crate::game::TURNS;
 use crate::permutation_handler::permute;
 use crate::strategy::{AbstractStrategy, RegularStrategy, Strategy};
 use crate::vector::{Float, Vector};
@@ -229,6 +230,7 @@ impl<const M: usize> State<M> {
         upload: bool,
         turn_index: i32,
         fixed_flop: u64,
+        turns: &Vec<u64>,
     ) -> Vector {
         //(util of sb, util of bb, exploitability of updating player)
         let opponent_range = match updating_player {
@@ -261,6 +263,7 @@ impl<const M: usize> State<M> {
                             upload,
                             turn_index,
                             fixed_flop,
+                            turns,
                         ),
 
                         Big => next.evaluate_state(
@@ -274,6 +277,7 @@ impl<const M: usize> State<M> {
                             upload,
                             turn_index,
                             fixed_flop,
+                            turns,
                         ),
                     };
 
@@ -330,6 +334,7 @@ impl<const M: usize> State<M> {
                             upload,
                             turn_index,
                             fixed_flop,
+                            turns,
                         );
                         // For safety for the future
                         for i in 0..1326 {
@@ -350,8 +355,7 @@ impl<const M: usize> State<M> {
                 assert_eq!(self.next_states.len(), 1);
                 let next_state = &mut self.next_states[0];
                 let mut count = 0;
-                for turn_card in 0..52 {
-                    let num_turn = 1 << turn_card;
+                for &num_turn in turns {
                     if num_turn & communal_cards > 0 {
                         continue;
                     }
@@ -376,6 +380,7 @@ impl<const M: usize> State<M> {
                         upload,
                         count,
                         fixed_flop,
+                        turns,
                     );
                     for i in 0..1326 {
                         if (evaluator.card_order()[i] & new_cards) > 0 {
@@ -389,15 +394,16 @@ impl<const M: usize> State<M> {
                 if !upload && !calc_exploit {
                     next_state.apply_updates(updating_player);
                 }
-                assert_eq!(count, 49);
-                total * (1.0 / 49.0)
+                assert_eq!(count, TURNS as i32);
+                total * (1.0 / TURNS as Float)
             }
             River => {
                 if cfg!(feature = "GPU") {
                     if upload {
                         upload_gpu(
                             builder,
-                            self.gpu_pointer.expect("Missing GPU index") * 49 + turn_index,
+                            self.gpu_pointer.expect("Missing GPU index") * TURNS as i32
+                                + turn_index,
                             opponent_range,
                         );
                         // No updates during upload, return does not matter
@@ -405,7 +411,8 @@ impl<const M: usize> State<M> {
                     } else {
                         download_gpu(
                             builder,
-                            self.gpu_pointer.expect("Missing GPU index") * 49 + turn_index,
+                            self.gpu_pointer.expect("Missing GPU index") * TURNS as i32
+                                + turn_index,
                         )
                     }
                 } else {
@@ -440,6 +447,7 @@ impl<const M: usize> State<M> {
                             upload,
                             turn_index,
                             fixed_flop,
+                            turns,
                         );
                         for i in 0..1326 {
                             if (evaluator.card_order()[i] & new_cards) > 0 {

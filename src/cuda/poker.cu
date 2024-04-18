@@ -577,24 +577,17 @@ __global__ void evaluate_all(Vector *opponent_ranges, Vector *results, State *ro
     int block = blockIdx.x;
     Vector *opponent_range = opponent_ranges + block;
     Vector *result = results + block;
-    State *state = root_states + 28 * (block / 49);
+    State *state = root_states + 28 * (block / TURNS);
     Vector *scratch = scratches + 10 * block;
     State *next = state->next_states[0];
 
     // Hacky way of finding turn card
-    int turn_index = block % 49;
-    long turn = 0;
-    for (int i = 0; (i < turn_index) || ((1l << turn) & evaluator->flop); turn++) {
-        if (!((1l << turn) & evaluator->flop)) {
-            i++;
-        }
-    }
-    //if (turn != (turn_index + 3)) printf("WADDAHEK %d %d\n", turn, turn_index);
-    turn = 1l << turn;
+    int turn_index = block % TURNS;
+    long turn = evaluator->turns[turn_index];
     long cards = evaluator->flop | turn;
 
-    for (int c = 0; c < 52; c++) {
-        long river = 1l << c;
+    for (int c = 0; c < RIVERS; c++) {
+        long river = evaluator->rivers[c + turn_index * RIVERS];
         if (river & cards) continue;
         Vector *new_range = scratch;
         copy(opponent_range, new_range);
@@ -609,7 +602,7 @@ __global__ void evaluate_all(Vector *opponent_ranges, Vector *results, State *ro
         remove_collisions(scratch + 1, river | cards);
         add_assign(result, scratch + 1);
     }
-    divide(result, 48.0f);
+    divide(result, (float) RIVERS);
     //remove_collisions(result, state->cards);
 }
 

@@ -14,11 +14,12 @@ void evaluate_cuda(Builder *builder,
                    bool calc_exploit) {
     cudaError_t err;
     Vector *device_scratch;
-    size_t scratch_size = sizeof(Vector) * 63 * 49 * 9 * 10; // 10 scratch per kernel
+    size_t scratch_size = sizeof(Vector) * 63 * TURNS * 9 * 10; // 10 scratch per kernel
     cudaMalloc(&device_scratch, scratch_size);
     cudaMemset(device_scratch, 0, scratch_size);
-    cudaMemcpy(builder->opponent_ranges, builder->communication, 63 * 49 * 9 * sizeof(Vector), cudaMemcpyHostToDevice);
-    cudaMemset(builder->results, 0, 63 * 49 * 9 * sizeof(Vector));
+    cudaMemcpy(builder->opponent_ranges, builder->communication, 63 * TURNS * 9 * sizeof(Vector),
+               cudaMemcpyHostToDevice);
+    cudaMemset(builder->results, 0, 63 * TURNS * 9 * sizeof(Vector));
     err = cudaGetLastError();
     if (err != cudaSuccess) {
         printf("Setup error: %s\n", cudaGetErrorString(err));
@@ -28,8 +29,9 @@ void evaluate_cuda(Builder *builder,
 //        printf("%d %f\n", i, builder->communication[0].values[i]);
 //    }
 //    fflush(stdout);
-    evaluate_all<<< 63 * 49 * 9, TPB>>>(builder->opponent_ranges, builder->results, builder->device_states, evaluator,
-                                        updating_player == 0 ? Small : Big, calc_exploit, device_scratch);
+    evaluate_all<<< 63 * TURNS * 9, TPB>>>(builder->opponent_ranges, builder->results, builder->device_states,
+                                           evaluator,
+                                           updating_player == 0 ? Small : Big, calc_exploit, device_scratch);
     cudaDeviceSynchronize();
     err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -43,7 +45,7 @@ void evaluate_cuda(Builder *builder,
         printf("Apply update error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
     }
-    cudaMemcpy(builder->communication, builder->results, 63 * 49 * 9 * sizeof(Vector), cudaMemcpyDeviceToHost);
+    cudaMemcpy(builder->communication, builder->results, 63 * TURNS * 9 * sizeof(Vector), cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
     cudaFree(device_scratch);
     err = cudaGetLastError();
@@ -55,11 +57,13 @@ void evaluate_cuda(Builder *builder,
 
 }
 Evaluator *transfer_flop_eval_cuda(long flop, long *card_order, short *card_indexes, short *eval, short *coll_vec,
-                                   short *abstractions) {
+                                   short *abstractions, long *turns, long *rivers) {
     cudaError_t err;
     Evaluator *device_eval;
     cudaMalloc(&device_eval, sizeof(Evaluator));
     cudaMemcpy(&device_eval->flop, &flop, sizeof(long), cudaMemcpyHostToDevice);
+    cudaMemcpy(&device_eval->turns, &turns, TURNS * sizeof(long), cudaMemcpyHostToDevice);
+    cudaMemcpy(&device_eval->rivers, &rivers, TURNS * RIVERS * sizeof(long), cudaMemcpyHostToDevice);
     cudaMemcpy(&device_eval->card_order, card_order, 1326 * sizeof(long), cudaMemcpyHostToDevice);
     cudaMemcpy(&device_eval->card_indexes, card_indexes, 52 * 51 * sizeof(short), cudaMemcpyHostToDevice);
     cudaMemcpy(&device_eval->eval, eval, 1326 * (1326 + 256 * 2) * sizeof(short), cudaMemcpyHostToDevice);
@@ -84,9 +88,9 @@ Builder *init_builder() {
     cudaMalloc(&builder->abstract_vectors, 63 * 9 * 26 * sizeof(AbstractVector));
     cudaMalloc(&builder->updates, 63 * 9 * 26 * sizeof(AbstractVector));
     cudaMemset(builder->abstract_vectors, 0, 63 * 26 * 9 * sizeof(AbstractVector));
-    cudaMallocHost(&builder->communication, 63 * 49 * 9 * sizeof(Vector));
-    cudaMalloc(&builder->opponent_ranges, 63 * 49 * 9 * sizeof(Vector));
-    cudaMalloc(&builder->results, 63 * 49 * 9 * sizeof(Vector));
+    cudaMallocHost(&builder->communication, 63 * TURNS * 9 * sizeof(Vector));
+    cudaMalloc(&builder->opponent_ranges, 63 * TURNS * 9 * sizeof(Vector));
+    cudaMalloc(&builder->results, 63 * TURNS * 9 * sizeof(Vector));
     printf("GPU builder created\n");
     fflush(stdout);
     return builder;

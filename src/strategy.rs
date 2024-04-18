@@ -132,6 +132,9 @@ impl<const M: usize> AbstractStrategy<M> {
         }
         for i in 0..1326 {
             let abstract_index = abstraction[i] as usize;
+            if abstract_index >= M {
+                dbg!(abstract_index);
+            }
             assert!(abstract_index < M);
             for k in 0..self.regrets.len() {
                 if sum[abstract_index] <= 1e-4 {

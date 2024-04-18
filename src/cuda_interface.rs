@@ -22,6 +22,8 @@ extern "C" {
         eval: *const u16,
         coll_vec: *const u16,
         abstraction: *const u16,
+        turns: *const u64,
+        rivers: *const u64,
     ) -> *const std::ffi::c_void;
     fn free_eval_cuda(ptr: *const std::ffi::c_void);
 
@@ -59,6 +61,8 @@ pub fn build_river(cards: u64, bet: Float, builder: Pointer) -> i32 {
 pub fn transfer_flop_eval<const M: usize>(
     eval: &Evaluator<M>,
     communal_cards: u64,
+    turns: Vec<u64>,
+    rivers: Vec<u64>,
 ) -> *const std::ffi::c_void {
     let _start = Instant::now();
     assert_eq!(communal_cards.count_ones(), 3);
@@ -106,6 +110,8 @@ pub fn transfer_flop_eval<const M: usize>(
             evals.as_ptr(),
             collisions.as_ptr(),
             abstractions.as_ptr(),
+            turns.as_ptr(),
+            rivers.as_ptr(),
         )
     };
     //println!("Transfer eval time: {}", _start.elapsed().as_secs_f32());
