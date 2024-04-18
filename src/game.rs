@@ -66,7 +66,7 @@ impl<const M: usize> Game<M> {
             }
             assert_eq!(turns.len(), TURNS);
             assert_eq!(rivers.len(), TURNS * RIVERS);
-            self.evaluator.get_flop_eval(flop);
+            self.evaluator.get_flop_eval(flop, &turns, &rivers, false);
             println!(
                 "Flop eval created in in {}s",
                 _start.elapsed().as_secs_f32()
@@ -76,6 +76,7 @@ impl<const M: usize> Game<M> {
                 flop,
                 turns.clone(),
                 rivers.clone(),
+                false,
             ));
             upload_strategy_gpu(self.builder, index as i32);
 

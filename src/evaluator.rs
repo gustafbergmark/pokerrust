@@ -1,7 +1,10 @@
 use crate::combination_map::CombinationMap;
+use crate::game::{RIVERS, TURNS};
 use itertools::Itertools;
 use poker::Suit::{Clubs, Diamonds, Hearts, Spades};
 use poker::{box_cards, Card, Suit};
+use rayon::iter::IntoParallelIterator;
+use rayon::iter::ParallelIterator;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
@@ -85,6 +88,54 @@ impl<const M: usize> Evaluator<M> {
             }
             flops.push(Self::cards_to_u64_inner(&flop, &card_nums));
         }
+        let turn_abstractions = match std::fs::read("./files/eval_small.bin") {
+            Ok(eval) => bincode::deserialize(&eval).expect("Failed to deserialize"),
+            Err(_) => {
+                let mut turn_abstractions = CombinationMap::new();
+                for (i, &flop) in flops.iter().enumerate() {
+                    println!("Finished abstraction for flop number {i}");
+                    for turn in Card::generate_deck() {
+                        let turn = Evaluator::<M>::cards_to_u64_inner(&[turn], &card_nums);
+                        if flop & turn > 0 {
+                            continue;
+                        }
+                        if let Some(_) = turn_abstractions.get(flop | turn) {
+                            continue;
+                        }
+                        let mut ehs = vec![0.0; 1326];
+                        let mut count = 0;
+                        for river in Card::generate_deck() {
+                            let river = Evaluator::<M>::cards_to_u64_inner(&[river], &card_nums);
+                            if river & (flop | turn) > 0 {
+                                continue;
+                            }
+                            count += 1;
+                            let cards = flop | turn | river;
+                            assert_eq!(cards.count_ones(), 5);
+                            let eval = Self::calculate_eval(cards, &num_cards, &card_order);
+                            let phs = phs(&eval, &card_order, cards);
+                            for i in 0..1326 {
+                                ehs[i] += phs[i] / 48.0;
+                            }
+                        }
+                        assert_eq!(count, 48);
+                        let ehs = ehs
+                            .into_iter()
+                            .map(|elem| (elem * M as f32) as u16)
+                            .collect();
+                        turn_abstractions.insert(flop | turn, ehs);
+                    }
+                }
+                match std::fs::write(
+                    "./files/eval_small.bin",
+                    bincode::serialize(&turn_abstractions).expect("Failed to serialize"),
+                ) {
+                    Ok(_) => println!("Created turn abstractions"),
+                    Err(e) => panic!("{}", e),
+                }
+                turn_abstractions
+            }
+        };
 
         Evaluator {
             card_order,
@@ -93,20 +144,72 @@ impl<const M: usize> Evaluator<M> {
             vectorized_eval: CombinationMap::new(),
             collisions: CombinationMap::new(),
             river_abstractions: CombinationMap::new(),
-            turn_abstractions: CombinationMap::new(),
+            turn_abstractions,
             card_nums,
             num_cards,
         }
     }
 
-    pub fn get_flop_eval(&mut self, flop: u64) {
+    fn calculate_eval(
+        communal_cards: u64,
+        num_cards: &HashMap<u64, Card>,
+        card_order: &Vec<u64>,
+    ) -> Vec<u16> {
+        assert_eq!(communal_cards.count_ones(), 5);
+        let evaluator = poker::Evaluator::new();
+        let hand = Evaluator::<M>::u64_to_cards_inner(communal_cards, num_cards);
+
+        let mut result: Vec<u16> = vec![0; 1326];
+        let mut evals = vec![];
+        for (i, &cards) in card_order.iter().enumerate() {
+            if communal_cards & cards > 0 {
+                evals.push((poker::Eval::WORST, i));
+            } else {
+                let combined = box_cards!(Self::u64_to_cards_inner(cards, &num_cards), hand);
+                evals.push((evaluator.evaluate(combined).expect("Failed to evaluate"), i));
+            }
+        }
+        evals.sort();
+        let mut prev_eval = poker::Eval::WORST;
+        let mut last_group = 0;
+        for (sorted_index, &(eval, mut index)) in evals.iter().enumerate() {
+            if eval > prev_eval || sorted_index == 0 {
+                prev_eval = eval;
+                last_group = sorted_index;
+                // 2048 bit set indicates start of new group
+                index |= 2048;
+            }
+            result[sorted_index] = index as u16;
+        }
+        result
+    }
+
+    pub fn get_flop_eval(
+        &mut self,
+        flop: u64,
+        turns: &Vec<u64>,
+        rivers: &Vec<u64>,
+        calc_exploit: bool,
+    ) {
         let evaluator = poker::Evaluator::new();
 
-        // For fixed flop game
-        let deck = Card::generate_deck().filter(|&card| self.cards_to_u64(&[card]) & flop == 0);
+        let runouts = if calc_exploit {
+            Card::generate_deck()
+                .filter(|&card| self.cards_to_u64(&[card]) & flop == 0)
+                .combinations(2)
+                .collect::<Vec<_>>()
+        } else {
+            let mut runouts = vec![];
+            for i in 0..TURNS {
+                for j in 0..RIVERS {
+                    runouts.push(self.u64_to_cards(turns[i] | rivers[j + i * RIVERS]))
+                }
+            }
+            runouts
+        };
 
-        let result = deck
-            .combinations(2)
+        let result = runouts
+            .into_par_iter()
             .map(|hand| {
                 let hand = box_cards!(hand, self.u64_to_cards(flop));
 
@@ -188,34 +291,6 @@ impl<const M: usize> Evaluator<M> {
             self.vectorized_eval.insert(key, order);
             self.collisions.insert(key, collisions);
             self.river_abstractions.insert(key, abstraction);
-        }
-
-        for turn in Card::generate_deck() {
-            let turn = self.cards_to_u64(&[turn]);
-            if flop & turn > 0 {
-                continue;
-            }
-            let mut ehs = vec![0.0; 1326];
-            let mut count = 0;
-            for river in Card::generate_deck() {
-                let river = self.cards_to_u64(&[river]);
-                if river & (flop | turn) > 0 {
-                    continue;
-                }
-                count += 1;
-                let cards = flop | turn | river;
-                assert_eq!(cards.count_ones(), 5);
-                let phs = phs(self.vectorized_eval(cards), &self.card_order, cards);
-                for i in 0..1326 {
-                    ehs[i] += phs[i] / 48.0;
-                }
-            }
-            assert_eq!(count, 48);
-            let ehs = ehs
-                .into_iter()
-                .map(|elem| (elem * M as f32) as u16)
-                .collect();
-            self.turn_abstractions.insert(flop | turn, ehs);
         }
     }
 
