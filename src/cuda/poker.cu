@@ -575,19 +575,36 @@ __global__ void apply_updates(State *root_states,
 __global__ void evaluate_all(Vector *opponent_ranges, Vector *results, State *root_states, Evaluator *evaluator,
                              Player updating_player, bool calc_exploit, Vector *scratches) {
     int block = blockIdx.x;
+    int evaluated_turns = calc_exploit ? 49 : TURNS;
+    int evaluated_rivers = calc_exploit ? 52 : RIVERS;
     Vector *opponent_range = opponent_ranges + block;
     Vector *result = results + block;
-    State *state = root_states + 28 * (block / TURNS);
+    State *state = root_states + 28 * (block / evaluated_turns);
     Vector *scratch = scratches + 10 * block;
     State *next = state->next_states[0];
 
     // Hacky way of finding turn card
-    int turn_index = block % TURNS;
-    long turn = evaluator->turns[turn_index];
+    int turn_index = block % evaluated_turns;
+    long turn = 0;
+    if (calc_exploit) {
+        for (int i = 0; (i < turn_index) || ((1l << turn) & evaluator->flop); turn++) {
+            if (!((1l << turn) & evaluator->flop)) {
+                i++;
+            }
+        }
+        turn = 1l << turn;
+    } else {
+        turn = evaluator->turns[turn_index];
+    }
     long cards = evaluator->flop | turn;
 
-    for (int c = 0; c < RIVERS; c++) {
-        long river = evaluator->rivers[c + turn_index * RIVERS];
+    for (int c = 0; c < evaluated_rivers; c++) {
+        long river;
+        if (calc_exploit) {
+            river = 1l << c;
+        } else {
+            river = evaluator->rivers[c + turn_index * RIVERS];
+        }
         if (river & cards) continue;
         Vector *new_range = scratch;
         copy(opponent_range, new_range);
@@ -602,7 +619,11 @@ __global__ void evaluate_all(Vector *opponent_ranges, Vector *results, State *ro
         remove_collisions(scratch + 1, river | cards);
         add_assign(result, scratch + 1);
     }
-    divide(result, (float) RIVERS);
+    if (calc_exploit) {
+        divide(result, 48.0);
+    } else {
+        divide(result, (float) RIVERS);
+    }
     //remove_collisions(result, state->cards);
 }
 

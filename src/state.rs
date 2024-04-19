@@ -356,7 +356,12 @@ impl<const M: usize> State<M> {
                 assert_eq!(self.next_states.len(), 1);
                 let next_state = &mut self.next_states[0];
                 let mut count = 0;
-                for &num_turn in turns {
+                let evaluated_turns = if calc_exploit {
+                    (0..52).map(|elem| 1_u64 << elem).collect()
+                } else {
+                    turns.clone()
+                };
+                for num_turn in evaluated_turns {
                     if num_turn & communal_cards > 0 {
                         continue;
                     }
@@ -400,10 +405,11 @@ impl<const M: usize> State<M> {
             }
             River => {
                 if cfg!(feature = "GPU") {
+                    let evaluated_turns = if calc_exploit { 49 } else { TURNS };
                     if upload {
                         upload_gpu(
                             builder,
-                            self.gpu_pointer.expect("Missing GPU index") * TURNS as i32
+                            self.gpu_pointer.expect("Missing GPU index") * evaluated_turns as i32
                                 + turn_index,
                             opponent_range,
                         );
@@ -412,7 +418,7 @@ impl<const M: usize> State<M> {
                     } else {
                         download_gpu(
                             builder,
-                            self.gpu_pointer.expect("Missing GPU index") * TURNS as i32
+                            self.gpu_pointer.expect("Missing GPU index") * evaluated_turns as i32
                                 + turn_index,
                         )
                     }

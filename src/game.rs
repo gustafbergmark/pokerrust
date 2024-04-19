@@ -171,7 +171,7 @@ impl<const M: usize> Game<M> {
                 evaluate_gpu(self.builder, eval_ptr, Small, false);
                 gputime += s.elapsed().as_millis();
             }
-            let _ = self.root.evaluate_state(
+            let val1 = self.root.evaluate_state(
                 &Vector::ones(),
                 &Vector::ones(),
                 &self.evaluator,
@@ -204,7 +204,7 @@ impl<const M: usize> Game<M> {
                 gputime += s.elapsed().as_millis();
             }
 
-            let _ = self.root.evaluate_state(
+            let val2 = self.root.evaluate_state(
                 &Vector::ones(),
                 &Vector::ones(),
                 &self.evaluator,
@@ -218,9 +218,10 @@ impl<const M: usize> Game<M> {
                 &turns,
             );
             println!(
-                "Iteration time: {}s, GPU time {}ms",
+                "Iteration time: {}s, GPU time {}ms, sum of values: {}",
                 _start.elapsed().as_secs_f32(),
-                gputime
+                gputime,
+                val1.sum() + val2.sum()
             );
             // Exploitability calculation must be redone for public chance sampling
             // let iter_time = _start.elapsed().as_secs_f32();
