@@ -88,7 +88,7 @@ impl<const M: usize> Evaluator<M> {
             }
             flops.push(Self::cards_to_u64_inner(&flop, &card_nums));
         }
-        let turn_abstractions = match std::fs::read("./files/eval_small.bin") {
+        let turn_abstractions = match std::fs::read("./files/turn_abstractions.bin") {
             Ok(eval) => bincode::deserialize(&eval).expect("Failed to deserialize"),
             Err(_) => {
                 let mut turn_abstractions = CombinationMap::new();
@@ -127,7 +127,7 @@ impl<const M: usize> Evaluator<M> {
                     }
                 }
                 match std::fs::write(
-                    "./files/eval_small.bin",
+                    "./files/turn_abstractions.bin",
                     bincode::serialize(&turn_abstractions).expect("Failed to serialize"),
                 ) {
                     Ok(_) => println!("Created turn abstractions"),

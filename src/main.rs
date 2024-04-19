@@ -13,13 +13,13 @@ mod strategy;
 mod vector;
 
 fn main() {
-    // Set heap size of gpu
-    //init_gpu();
-    let mut game: Game<256> = builder::fixed_flop_poker();
     let start = Instant::now();
-    for i in 1..=10000 {
+    let mut game: Game<256> = builder::fixed_flop_poker();
+    game.load();
+    for i in 1..=0 {
         game.perform_iter(i);
     }
+    game.save();
     //dbg!(&game);
     dbg!(start.elapsed().as_millis());
 }

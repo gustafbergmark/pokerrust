@@ -11,11 +11,16 @@ use std::time::Instant;
 extern "C" {
     fn init_builder() -> *const std::ffi::c_void;
 
+    // pub fn load_blob(builder: *const std::ffi::c_void);
+    // pub fn save_blob(builder: *const std::ffi::c_void);
+    // pub fn hash(builder: *const std::ffi::c_void);
+
     fn upload_c(builder: *const std::ffi::c_void, index: i32, v: *const Float);
     fn download_c(builder: *const std::ffi::c_void, index: i32, v: *mut Float);
 
-    fn upload_strategy_c(builder: *const std::ffi::c_void, index: i32);
-    fn download_strategy_c(builder: *const std::ffi::c_void, index: i32);
+    fn upload_strategy_c(builder: *const std::ffi::c_void, v: *const Float);
+    fn download_strategy_c(builder: *const std::ffi::c_void, v: *mut Float);
+    fn set_memory_c(builder: *const std::ffi::c_void, v: *const Float);
 
     fn build_river_cuda(cards: u64, bet: Float, builder: *const std::ffi::c_void) -> i32;
     fn transfer_flop_eval_cuda(
@@ -49,11 +54,14 @@ pub fn download_gpu(builder: Pointer, index: i32) -> Vector {
     result
 }
 
-pub fn upload_strategy_gpu(builder: Pointer, index: i32) {
-    unsafe { upload_strategy_c(builder.0, index) }
+pub fn set_builder_memory(builder: Pointer, v: &mut Vec<Float>) {
+    unsafe { set_memory_c(builder.0, v.as_mut_ptr()) }
 }
-pub fn download_strategy_gpu(builder: Pointer, index: i32) {
-    unsafe { download_strategy_c(builder.0, index) }
+pub fn upload_strategy_gpu(builder: Pointer, ptr: &[Float]) {
+    unsafe { upload_strategy_c(builder.0, ptr.as_ptr()) }
+}
+pub fn download_strategy_gpu(builder: Pointer, ptr: &mut [Float]) {
+    unsafe { download_strategy_c(builder.0, ptr.as_mut_ptr()) }
 }
 pub fn initialize_builder() -> Pointer {
     Pointer(unsafe { init_builder() })

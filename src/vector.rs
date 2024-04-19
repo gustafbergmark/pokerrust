@@ -1,9 +1,12 @@
+use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
 use std::iter::Sum;
 use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
 #[repr(align(256))]
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Vector {
+    #[serde(with = "BigArray")]
     pub values: [Float; 1326],
 }
 

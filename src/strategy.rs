@@ -1,10 +1,12 @@
 use crate::evaluator::Evaluator;
 use crate::vector::Float;
 use crate::vector::Vector;
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::fmt::{Debug, Formatter};
 use std::iter::zip;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum Strategy<const M: usize> {
     Regular(RegularStrategy),
     Abstract(AbstractStrategy<M>),
@@ -15,6 +17,20 @@ impl<const M: usize> Strategy<M> {
         match self {
             Strategy::Regular(strategy) => strategy.add_strategy(),
             Strategy::Abstract(strategy) => strategy.add_strategy(),
+        }
+    }
+
+    pub fn save(&self, buf: &mut VecDeque<Float>) {
+        match self {
+            Strategy::Regular(strategy) => strategy.save(buf),
+            Strategy::Abstract(strategy) => strategy.save(buf),
+        }
+    }
+
+    pub fn load(&mut self, buf: &mut VecDeque<Float>) {
+        match self {
+            Strategy::Regular(strategy) => strategy.load(buf),
+            Strategy::Abstract(strategy) => strategy.load(buf),
         }
     }
 
@@ -34,7 +50,7 @@ impl<const M: usize> Strategy<M> {
 }
 
 // holds historic winnings of each move and hand
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct RegularStrategy {
     regrets: Vec<Vector>,
 }
@@ -52,6 +68,22 @@ impl RegularStrategy {
 
     pub fn add_strategy(&mut self) {
         self.regrets.push(Vector::default());
+    }
+
+    pub fn save(&self, buf: &mut VecDeque<Float>) {
+        for action in &self.regrets {
+            for &val in &action.values {
+                buf.push_back(val);
+            }
+        }
+    }
+
+    pub fn load(&mut self, buf: &mut VecDeque<Float>) {
+        for action in self.regrets.iter_mut() {
+            for i in 0..1326 {
+                action[i] = buf.pop_front().unwrap();
+            }
+        }
     }
 
     pub fn update_add(&mut self, updates: &Vec<Vector>) {
@@ -82,7 +114,7 @@ impl RegularStrategy {
 }
 
 // holds historic winnings of each move and hand
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct AbstractStrategy<const M: usize> {
     regrets: Vec<Vec<Float>>,
     updates: Vec<Vec<Float>>,
@@ -99,6 +131,22 @@ impl<const M: usize> AbstractStrategy<M> {
         AbstractStrategy {
             regrets: vec![],
             updates: vec![],
+        }
+    }
+
+    pub fn save(&self, buf: &mut VecDeque<Float>) {
+        for action in &self.regrets {
+            for &val in action {
+                buf.push_back(val);
+            }
+        }
+    }
+
+    pub fn load(&mut self, buf: &mut VecDeque<Float>) {
+        for action in self.regrets.iter_mut() {
+            for i in 0..M {
+                action[i] = buf.pop_front().unwrap();
+            }
         }
     }
 

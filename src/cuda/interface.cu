@@ -5,6 +5,12 @@
 #include "structs.h"
 #include "evaluator.cuh"
 #include "builder.cu"
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#include <filesystem>
+#include <iostream>
+
 
 extern "C" {
 
@@ -84,7 +90,8 @@ Builder *init_builder() {
     Builder *builder = (Builder *) calloc(1, sizeof(Builder));
     builder->current_index = 0;
     cudaMalloc(&builder->device_states, 63 * 9 * 28 * sizeof(State));
-    builder->memory_abstract_vectors = (AbstractVector *) calloc(63 * 9 * 26 * 1755, sizeof(AbstractVector));
+    //builder->memory_abstract_vectors = (AbstractVector *) calloc(63 * 9 * 26 * 1755, sizeof(AbstractVector));
+    //if (builder->memory_abstract_vectors == NULL) printf("Failed to allocate blob memory\n");
     cudaMalloc(&builder->abstract_vectors, 63 * 9 * 26 * sizeof(AbstractVector));
     cudaMalloc(&builder->updates, 63 * 9 * 26 * sizeof(AbstractVector));
     cudaMemset(builder->abstract_vectors, 0, 63 * 26 * 9 * sizeof(AbstractVector));
@@ -96,6 +103,45 @@ Builder *init_builder() {
     return builder;
 }
 
+//void set_memory_c(Builder *builder, AbstractVector *memory) {
+//    builder->memory_abstract_vectors = memory;
+//}
+
+//void load_blob(Builder *builder) {
+//    int file = open("./files/blob.bin", O_RDWR, 0600);
+//    void *src = mmap(NULL, sizeof(float) * 63 * 9 * 26 * 1755 * 256,
+//                     PROT_READ | PROT_WRITE, MAP_SHARED, file, 0);
+//    if (src == MAP_FAILED) {
+//        printf("mmap failed");
+//    }
+//    memcpy(builder->memory_abstract_vectors, src, sizeof(float) * 63 * 9 * 26 * 1755 * 256);
+//    fflush(stdout);
+//    munmap(src, sizeof(float) * 63 * 9 * 26 * 1755 * 256);
+//    close(file);
+//}
+//
+//void save_blob(Builder *builder) {
+//    float hash = 0;
+//    for (int i = 0; i < 63 * 9 * 26 * 1755; i++) {
+//        for (int j = 0; j < ABSTRACTIONS; j++) {
+//            float val = builder->memory_abstract_vectors[i].values[j];
+//            hash *= fmod(val, 1000);
+//            hash = fmod(hash, 1000);
+//        }
+//    }
+//    printf("Saved GPU blob with hash %f\n", hash);
+//    int file = open("./files/blob.bin", O_RDWR, 0600);
+//    void *src = mmap(NULL, sizeof(float) * 63 * 9 * 26 * 1755 * 256,
+//                     PROT_READ | PROT_WRITE, MAP_SHARED, file, 0);
+//    if (src == MAP_FAILED) {
+//        printf("mmap failed");
+//    }
+//    memcpy(src, builder->memory_abstract_vectors, sizeof(float) * 63 * 9 * 26 * 1755 * 256);
+//    fflush(stdout);
+//    munmap(src, sizeof(float) * 63 * 9 * 26 * 1755 * 256);
+//    close(file);
+//}
+
 void upload_c(Builder *builder, int index, DataType *vector) {
     memcpy(builder->communication + index, vector, 1326 * sizeof(DataType));
 }
@@ -104,13 +150,13 @@ void download_c(Builder *builder, int index, DataType *vector) {
     memcpy(vector, builder->communication + index, 1326 * sizeof(DataType));
 }
 
-void upload_strategy_c(Builder *builder, int index) {
-    cudaMemcpy(builder->abstract_vectors, &builder->memory_abstract_vectors[index],
+void upload_strategy_c(Builder *builder, DataType *source) {
+    cudaMemcpy(builder->abstract_vectors, source,
                63 * 9 * 26 * sizeof(AbstractVector), cudaMemcpyHostToDevice);
 }
 
-void download_strategy_c(Builder *builder, int index) {
-    cudaMemcpy(&builder->memory_abstract_vectors[index], builder->abstract_vectors,
+void download_strategy_c(Builder *builder, DataType *dest) {
+    cudaMemcpy(dest, builder->abstract_vectors,
                63 * 9 * 26 * sizeof(AbstractVector), cudaMemcpyDeviceToHost);
 }
 
@@ -123,7 +169,6 @@ int build_river_cuda(long cards, DataType bet, Builder *builder) {
     State *root = (State *) malloc(state_size);
 
     State *device_root = builder->device_states + (builder->current_index % 567) * 28;
-    AbstractVector *memory_abstract_vectors = builder->memory_abstract_vectors + builder->current_index * 26;
     AbstractVector *abstract_vectors = builder->abstract_vectors + (builder->current_index % 567) * 26;
     AbstractVector *updates = builder->updates + (builder->current_index % 567) * 26;
     builder->current_index += 1;

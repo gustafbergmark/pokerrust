@@ -138,7 +138,7 @@ dependencies = [
 [[package]]
 name = "poker"
 version = "0.4.1"
-source = "git+https://github.com/gustafbergmark/poker.git#dc15b08056977f9e067ec06a4af8f83358b45005"
+source = "git+https://github.com/gustafbergmark/poker.git#189eb5a0b7346caa001b9bfe21051ad19b53cf6b"
 dependencies = [
  "cfg-if",
  "itertools",
@@ -161,6 +161,7 @@ dependencies = [
  "rand",
  "rayon",
  "serde",
+ "serde-big-array",
  "serde_json",
  "serde_json_any_key",
 ]
@@ -258,6 +259,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60363bdd39a7be0266a520dab25fdc9241d2f987b08a01e01f0ec6d06a981348"
 dependencies = [
  "serde_derive",
+]
+
+[[package]]
+name = "serde-big-array"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11fc7cc2c76d73e0f27ee52abbd64eec84d46f370c88371120433196934e4b7f"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

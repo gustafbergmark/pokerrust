@@ -11,7 +11,8 @@ use crate::vector::{Float, Vector};
 use itertools::Itertools;
 use poker::Suit::*;
 use poker::{Card, Suit};
-use std::collections::HashSet;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashSet, VecDeque};
 use std::ffi::c_void;
 use std::iter::zip;
 
@@ -19,7 +20,7 @@ use std::iter::zip;
 pub struct Pointer(pub(crate) *const c_void);
 unsafe impl Send for Pointer {}
 unsafe impl Sync for Pointer {}
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct State<const M: usize> {
     pub terminal: TerminalState,
     pub action: Action,
@@ -80,7 +81,7 @@ impl<const M: usize> State<M> {
             Small => self.bbbet,
             Big => self.sbbet,
         };
-        let strategy = if self.cards.count_ones() < 5 {
+        let strategy = if self.cards.count_ones() < 4 {
             Strategy::Regular(RegularStrategy::new())
         } else {
             Strategy::Abstract(AbstractStrategy::new())
@@ -475,6 +476,20 @@ impl<const M: usize> State<M> {
         }
         for next in self.next_states.iter_mut() {
             next.apply_updates(updating_player);
+        }
+    }
+
+    pub fn save(&self, buf: &mut VecDeque<Float>) {
+        self.card_strategies.save(buf);
+        for next in &self.next_states {
+            next.save(buf);
+        }
+    }
+
+    pub fn load(&mut self, buf: &mut VecDeque<Float>) {
+        self.card_strategies.load(buf);
+        for next in self.next_states.iter_mut() {
+            next.load(buf);
         }
     }
 
