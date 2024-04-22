@@ -613,6 +613,13 @@ __global__ void evaluate_all(Vector *opponent_ranges, Vector *results, State *ro
         int eval_index = get_index(set);
         short *eval = evaluator->eval + eval_index * (1326 + 256 * 2);
         short *coll_vec = evaluator->coll_vec + eval_index * 52 * 51;
+        if ((block == 0) && (threadIdx.x == 0)) {
+            for (int i = 0; i < 1326; i++) {
+                if (!((new_range->values[i] >= 0) && (new_range->values[i] <= 1)))
+                    printf("wrong input %f\n", new_range->values[i]);
+            }
+        }
+
         evaluate_river(new_range, next, scratch + 1, cards | river, evaluator->card_indexes, eval,
                        coll_vec, evaluator->abstractions + eval_index * 1326,
                        updating_player, calc_exploit);

@@ -229,9 +229,9 @@ impl<const M: usize> State<M> {
         communal_cards: u64,
         builder: Pointer,
         upload: bool,
-        turn_index: i32,
         fixed_flop: u64,
         turns: &Vec<u64>,
+        communication_index: &mut usize,
     ) -> Vector {
         //(util of sb, util of bb, exploitability of updating player)
         let opponent_range = match updating_player {
@@ -262,9 +262,9 @@ impl<const M: usize> State<M> {
                             communal_cards,
                             builder,
                             upload,
-                            turn_index,
                             fixed_flop,
                             turns,
+                            communication_index,
                         ),
 
                         Big => next.evaluate_state(
@@ -276,9 +276,9 @@ impl<const M: usize> State<M> {
                             communal_cards,
                             builder,
                             upload,
-                            turn_index,
                             fixed_flop,
                             turns,
+                            communication_index,
                         ),
                     };
 
@@ -333,9 +333,9 @@ impl<const M: usize> State<M> {
                             next_state.cards,
                             builder,
                             upload,
-                            turn_index,
                             fixed_flop,
                             turns,
+                            communication_index,
                         );
                         // For safety for the future
                         for i in 0..1326 {
@@ -361,7 +361,7 @@ impl<const M: usize> State<M> {
                 } else {
                     turns.clone()
                 };
-                for num_turn in evaluated_turns {
+                for &num_turn in &evaluated_turns {
                     if num_turn & communal_cards > 0 {
                         continue;
                     }
@@ -384,9 +384,9 @@ impl<const M: usize> State<M> {
                         new_cards,
                         builder,
                         upload,
-                        count,
                         fixed_flop,
                         turns,
+                        communication_index,
                     );
                     for i in 0..1326 {
                         if (evaluator.card_order()[i] & new_cards) > 0 {
@@ -400,27 +400,27 @@ impl<const M: usize> State<M> {
                 if !upload && !calc_exploit {
                     next_state.apply_updates(updating_player);
                 }
-                assert_eq!(count, TURNS as i32);
+                assert_eq!(count, if calc_exploit { 49 } else { TURNS as i32 });
                 total * (1.0 / TURNS as Float)
             }
             River => {
                 if cfg!(feature = "GPU") {
                     let evaluated_turns = if calc_exploit { 49 } else { TURNS };
                     if upload {
-                        upload_gpu(
-                            builder,
-                            self.gpu_pointer.expect("Missing GPU index") * evaluated_turns as i32
-                                + turn_index,
-                            opponent_range,
-                        );
+                        upload_gpu(builder, *communication_index as i32, opponent_range);
+                        *communication_index += 1;
+                        for e in opponent_range.values {
+                            assert!(!e.is_nan())
+                        }
                         // No updates during upload, return does not matter
                         Vector::default()
                     } else {
-                        download_gpu(
-                            builder,
-                            self.gpu_pointer.expect("Missing GPU index") * evaluated_turns as i32
-                                + turn_index,
-                        )
+                        let v = download_gpu(builder, *communication_index as i32);
+                        *communication_index += 1;
+                        for e in v.values {
+                            assert!(!e.is_nan())
+                        }
+                        v
                     }
                 } else {
                     let mut total = Vector::default();
@@ -452,9 +452,9 @@ impl<const M: usize> State<M> {
                             new_cards,
                             builder,
                             upload,
-                            turn_index,
                             fixed_flop,
                             turns,
+                            communication_index,
                         );
                         for i in 0..1326 {
                             if (evaluator.card_order()[i] & new_cards) > 0 {

@@ -21,12 +21,12 @@ void evaluate_cuda(Builder *builder,
     cudaError_t err;
     Vector *device_scratch;
     int evaluated_turns = calc_exploit ? 49 : TURNS;
-    size_t scratch_size = sizeof(Vector) * 63 * evaluated_turns * 9 * 10; // 10 scratch per kernel
+    size_t scratch_size = sizeof(Vector) * 63 * 49 * 9 * 10; // 10 scratch per kernel
     cudaMalloc(&device_scratch, scratch_size);
     cudaMemset(device_scratch, 0, scratch_size);
-    cudaMemcpy(builder->opponent_ranges, builder->communication, 63 * evaluated_turns * 9 * sizeof(Vector),
+    cudaMemcpy(builder->opponent_ranges, builder->communication, 63 * 49 * 9 * sizeof(Vector),
                cudaMemcpyHostToDevice);
-    cudaMemset(builder->results, 0, 63 * evaluated_turns * 9 * sizeof(Vector));
+    cudaMemset(builder->results, 0, 63 * 49 * 9 * sizeof(Vector));
     err = cudaGetLastError();
     if (err != cudaSuccess) {
         printf("Setup error: %s\n", cudaGetErrorString(err));
@@ -45,14 +45,16 @@ void evaluate_cuda(Builder *builder,
         printf("Main execution error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
     }
-    apply_updates<<<63 * 9, TPB>>>(builder->device_states, updating_player == 0 ? Small : Big);
-    cudaDeviceSynchronize();
-    err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("Apply update error: %s\n", cudaGetErrorString(err));
-        fflush(stdout);
+    if (!calc_exploit) {
+        apply_updates<<<63 * 9, TPB>>>(builder->device_states, updating_player == 0 ? Small : Big);
+        cudaDeviceSynchronize();
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            printf("Apply update error: %s\n", cudaGetErrorString(err));
+            fflush(stdout);
+        }
     }
-    cudaMemcpy(builder->communication, builder->results, 63 * evaluated_turns * 9 * sizeof(Vector),
+    cudaMemcpy(builder->communication, builder->results, 63 * 49 * 9 * sizeof(Vector),
                cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
     cudaFree(device_scratch);
@@ -60,6 +62,15 @@ void evaluate_cuda(Builder *builder,
     if (err != cudaSuccess) {
         printf("Aggregation error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
+    }
+    for (int i = 0; i < 63 * evaluated_turns * 9; i++) {
+        for (int j = 0; j < 1326; j++) {
+            if (!(abs(builder->communication[i].values[j]) < 125500)) {
+                printf("C++ impossible range values %f %s\n", builder->communication[i].values[j],
+                       calc_exploit ? "true" : "false");
+                exit(7);
+            }
+        }
     }
     fflush(stdout);
 
@@ -70,8 +81,8 @@ Evaluator *transfer_flop_eval_cuda(long flop, long *card_order, short *card_inde
     Evaluator *device_eval;
     cudaMalloc(&device_eval, sizeof(Evaluator));
     cudaMemcpy(&device_eval->flop, &flop, sizeof(long), cudaMemcpyHostToDevice);
-    cudaMemcpy(&device_eval->turns, &turns, TURNS * sizeof(long), cudaMemcpyHostToDevice);
-    cudaMemcpy(&device_eval->rivers, &rivers, TURNS * RIVERS * sizeof(long), cudaMemcpyHostToDevice);
+    cudaMemcpy(&device_eval->turns, turns, TURNS * sizeof(long), cudaMemcpyHostToDevice);
+    cudaMemcpy(&device_eval->rivers, rivers, TURNS * RIVERS * sizeof(long), cudaMemcpyHostToDevice);
     cudaMemcpy(&device_eval->card_order, card_order, 1326 * sizeof(long), cudaMemcpyHostToDevice);
     cudaMemcpy(&device_eval->card_indexes, card_indexes, 52 * 51 * sizeof(short), cudaMemcpyHostToDevice);
     cudaMemcpy(&device_eval->eval, eval, 1326 * (1326 + 256 * 2) * sizeof(short), cudaMemcpyHostToDevice);
@@ -92,12 +103,12 @@ Builder *init_builder() {
     Builder *builder = (Builder *) calloc(1, sizeof(Builder));
     builder->current_index = 0;
     cudaMalloc(&builder->device_states, 63 * 9 * 28 * sizeof(State));
-    //builder->memory_abstract_vectors = (AbstractVector *) calloc(63 * 9 * 26 * 1755, sizeof(AbstractVector));
-    //if (builder->memory_abstract_vectors == NULL) printf("Failed to allocate blob memory\n");
     cudaMalloc(&builder->abstract_vectors, 63 * 9 * 26 * sizeof(AbstractVector));
-    cudaMalloc(&builder->updates, 63 * 9 * 26 * sizeof(AbstractVector));
     cudaMemset(builder->abstract_vectors, 0, 63 * 26 * 9 * sizeof(AbstractVector));
+    cudaMalloc(&builder->updates, 63 * 9 * 26 * sizeof(AbstractVector));
+    cudaMemset(builder->updates, 0, 63 * 26 * 9 * sizeof(AbstractVector));
     cudaMallocHost(&builder->communication, 63 * 49 * 9 * sizeof(Vector));
+    memset(builder->communication, 0, 63 * 49 * 9 * sizeof(Vector));
     cudaMalloc(&builder->opponent_ranges, 63 * 49 * 9 * sizeof(Vector));
     cudaMalloc(&builder->results, 63 * 49 * 9 * sizeof(Vector));
     printf("GPU builder created\n");
@@ -164,30 +175,32 @@ void download_strategy_c(Builder *builder, DataType *dest) {
 
 int build_river_cuda(long cards, DataType bet, Builder *builder) {
     cudaError_t err;
-    int start = builder->current_index;
-    int abstract_vector_index = 0;
-    int state_index = 0;
-    int state_size = sizeof(State) * (28);
-    State *root = (State *) malloc(state_size);
+    int start = builder->current_index % 567;
+    // As the game tree is identical for each flop, we only need to build it once
+    // There are 63 * 9 = 567 different ways to reach a river deal for each flop.
+    if (builder->current_index < 567) {
+        int abstract_vector_index = 0;
+        int state_index = 0;
+        int state_size = sizeof(State) * (28);
+        State *root = (State *) malloc(state_size);
 
-    State *device_root = builder->device_states + (builder->current_index % 567) * 28;
-    AbstractVector *abstract_vectors = builder->abstract_vectors + (builder->current_index % 567) * 26;
-    AbstractVector *updates = builder->updates + (builder->current_index % 567) * 26;
-    builder->current_index += 1;
+        State *device_root = builder->device_states + start * 28;
+        AbstractVector *abstract_vectors = builder->abstract_vectors + start * 26;
+        AbstractVector *updates = builder->updates + start * 26;
 
-    build_river(cards, bet, root, device_root, &state_index, abstract_vectors, updates,
-                &abstract_vector_index);
-    cudaMemcpy(device_root, root, state_size, cudaMemcpyHostToDevice);
-    cudaDeviceSynchronize();
-    err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("Build error: %s\n", cudaGetErrorString(err));
-        fflush(stdout);
+        build_river(cards, bet, root, device_root, &state_index, abstract_vectors, updates,
+                    &abstract_vector_index);
+        cudaMemcpy(device_root, root, state_size, cudaMemcpyHostToDevice);
+        cudaDeviceSynchronize();
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            printf("Build error: %s\n", cudaGetErrorString(err));
+            fflush(stdout);
+        }
+        //printf("index: %d\n", start); // 567
+        free(root);
     }
-//    printf("index: %d\n", start); // 567
-//    printf("vector index: %d\n", abstract_vector_index);
-//    fflush(stdout);
-    free(root);
-    return start % 567;
+    builder->current_index += 1;
+    return start;
 }
 }
