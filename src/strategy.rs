@@ -196,6 +196,9 @@ impl<const M: usize> AbstractStrategy<M> {
     }
 
     pub fn apply_updates(&mut self) {
+        if self.updates.is_empty() {
+            return;
+        }
         for k in 0..self.regrets.len() {
             for i in 0..M {
                 self.regrets[k][i] += self.updates[k][i];

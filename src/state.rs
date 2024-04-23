@@ -4,10 +4,11 @@ use crate::enums::Player::*;
 use crate::enums::TerminalState::*;
 use crate::enums::*;
 use crate::evaluator::{separate_cards, Evaluator};
-use crate::game::TURNS;
+use crate::game::{RIVERS, TURNS};
 use crate::permutation_handler::permute;
 use crate::strategy::{AbstractStrategy, RegularStrategy, Strategy};
 use crate::vector::{Float, Vector};
+use assert_approx_eq::assert_approx_eq;
 use itertools::Itertools;
 use poker::Suit::*;
 use poker::{Card, Suit};
@@ -143,8 +144,7 @@ impl<const M: usize> State<M> {
             DealFlop => {
                 let deck = Card::generate_deck();
                 //let flops = deck.combinations(3); // Full game
-                //let flops = deck.take(3).combinations(3); // Fixed flop game
-                let flops = deck.combinations(3); // Fixed flop game
+                let flops = deck.take(3).combinations(3); // Fixed flop game
                 let mut set: HashSet<u64> = HashSet::new();
                 let mut next_states = Vec::new();
                 for flop in flops {
@@ -197,7 +197,7 @@ impl<const M: usize> State<M> {
             }
             DealRiver => {
                 // Do not create river subgames on CPU if they are created on GPU
-                if cfg!(feature = "GPU") {
+                if cfg!(feature = "GPU") && false {
                     return vec![];
                 }
                 let deck = Card::generate_deck();
@@ -314,7 +314,7 @@ impl<const M: usize> State<M> {
                 let mut total = Vector::default();
                 let mut count = 0.0;
                 for next_state in self.next_states.iter_mut() {
-                    if next_state.cards == fixed_flop || fixed_flop == 0 {
+                    if next_state.cards == fixed_flop || fixed_flop == 0 || true {
                         let mut new_sb_range = *sb_range;
                         let mut new_bb_range = *bb_range;
                         // It is impossible to have hands which contains flop cards
@@ -405,24 +405,24 @@ impl<const M: usize> State<M> {
                 total * (1.0 / (count as Float))
             }
             River => {
-                if cfg!(feature = "GPU") {
-                    if upload {
-                        upload_gpu(builder, *communication_index as i32, opponent_range);
-                        *communication_index += 1;
-                        for e in opponent_range.values {
-                            assert!(!e.is_nan())
-                        }
-                        // No updates during upload, return does not matter
-                        Vector::default()
-                    } else {
-                        let v = download_gpu(builder, *communication_index as i32);
-                        *communication_index += 1;
-                        for e in v.values {
-                            assert!(!e.is_nan())
-                        }
-                        v
+                let gpu_res = if upload {
+                    upload_gpu(builder, *communication_index as i32, opponent_range);
+                    *communication_index += 1;
+                    for e in opponent_range.values {
+                        assert!(!e.is_nan())
                     }
+                    // No updates during upload, return does not matter
+                    Vector::default()
                 } else {
+                    let v = download_gpu(builder, *communication_index as i32);
+                    *communication_index += 1;
+                    for e in v.values {
+                        assert!(!e.is_nan())
+                    }
+                    v
+                };
+
+                if !upload && true {
                     let mut total = Vector::default();
                     assert_eq!(self.next_states.len(), 1);
                     let next_state = &mut self.next_states[0];
@@ -465,9 +465,18 @@ impl<const M: usize> State<M> {
                     }
                     // Apply the aggregated updates from all iteration on the abstract strategy
                     // next_state.apply_updates(updating_player);
-                    assert_eq!(count, 48);
-                    total * (1.0 / 48.0)
+                    assert_eq!(count, RIVERS);
+                    total *= (1.0 / count as Float);
+                    for i in 0..1326 {
+                        if (gpu_res[i] - total[i]).abs() > 1e-6 {
+                            for j in 0..1326 {
+                                println!("{} {}", gpu_res[j], total[j]);
+                            }
+                        }
+                        assert_approx_eq!(gpu_res[i], total[i]);
+                    }
                 }
+                gpu_res
             }
         }
     }

@@ -41,67 +41,67 @@ impl<const M: usize> Game<M> {
             root,
             evaluator,
             builder,
-            blob: vec![0.0; 63 * 9 * 26 * 1755 * 256],
+            blob: vec![0.0; 63 * 9 * 26 /* 1755*/ * 256], // todo
         }
     }
 
-    pub fn save(&self) {
-        println!("Saving game");
-        let mut buf = VecDeque::new();
-        self.root.save(&mut buf);
-        buf.make_contiguous();
-        let mut hasher = DefaultHasher::new();
-        assert_eq!(buf.len(), buf.as_slices().0.len());
-        as_bytes(buf.as_slices().0).hash(&mut hasher);
-        dbg!(buf.len(), hasher.finish());
-        match std::fs::write(
-            "./files/game.bin",
-            bincode::serialize(&buf).expect("Failed to serialize"),
-        ) {
-            Ok(_) => println!("Saved game"),
-            Err(e) => panic!("{}", e),
-        }
-        let blob = as_bytes(&self.blob);
-        hasher = DefaultHasher::new();
-        blob.hash(&mut hasher);
-        println!("Saving blob hash: {}", hasher.finish());
-
-        match bincode::serialize_into(
-            BufWriter::new(File::create("./files/blob.bin").expect("Failed to open file")),
-            &self.blob,
-        ) {
-            Ok(_) => println!("Saved blob"),
-            Err(e) => panic!("{}", e),
-        }
-    }
-
-    pub fn load(&mut self) {
-        let start = Instant::now();
-        let mut buf = match std::fs::read("./files/game.bin") {
-            Ok(eval) => {
-                let mut buf: VecDeque<Float> =
-                    bincode::deserialize(&eval).expect("Failed to deserialize");
-                buf.make_contiguous();
-                let mut hasher = DefaultHasher::new();
-                assert_eq!(buf.len(), buf.as_slices().0.len());
-                as_bytes(buf.as_slices().0).hash(&mut hasher);
-                dbg!(buf.len(), hasher.finish());
-                buf
-            }
-            Err(e) => panic!("{}", e),
-        };
-        self.root.load(&mut buf);
-        assert_eq!(buf.len(), 0);
-        self.blob = bincode::deserialize_from(BufReader::new(
-            File::open("./files/blob.bin").expect("Failed to open blob.bin"),
-        ))
-        .expect("Failed to deserialize blob");
-        let mut hasher = DefaultHasher::new();
-        let bytes = as_bytes(&self.blob);
-        bytes.hash(&mut hasher);
-        println!("Deserialized blob with hash {}", hasher.finish());
-        println!("Loaded root in {}ms", start.elapsed().as_millis());
-    }
+    // pub fn save(&self) {
+    //     println!("Saving game");
+    //     let mut buf = VecDeque::new();
+    //     self.root.save(&mut buf);
+    //     buf.make_contiguous();
+    //     let mut hasher = DefaultHasher::new();
+    //     assert_eq!(buf.len(), buf.as_slices().0.len());
+    //     as_bytes(buf.as_slices().0).hash(&mut hasher);
+    //     dbg!(buf.len(), hasher.finish());
+    //     match std::fs::write(
+    //         "./files/game.bin",
+    //         bincode::serialize(&buf).expect("Failed to serialize"),
+    //     ) {
+    //         Ok(_) => println!("Saved game"),
+    //         Err(e) => panic!("{}", e),
+    //     }
+    //     let blob = as_bytes(&self.blob);
+    //     hasher = DefaultHasher::new();
+    //     blob.hash(&mut hasher);
+    //     println!("Saving blob hash: {}", hasher.finish());
+    //
+    //     match bincode::serialize_into(
+    //         BufWriter::new(File::create("./files/blob.bin").expect("Failed to open file")),
+    //         &self.blob,
+    //     ) {
+    //         Ok(_) => println!("Saved blob"),
+    //         Err(e) => panic!("{}", e),
+    //     }
+    // }
+    //
+    // pub fn load(&mut self) {
+    //     let start = Instant::now();
+    //     let mut buf = match std::fs::read("./files/game.bin") {
+    //         Ok(eval) => {
+    //             let mut buf: VecDeque<Float> =
+    //                 bincode::deserialize(&eval).expect("Failed to deserialize");
+    //             buf.make_contiguous();
+    //             let mut hasher = DefaultHasher::new();
+    //             assert_eq!(buf.len(), buf.as_slices().0.len());
+    //             as_bytes(buf.as_slices().0).hash(&mut hasher);
+    //             dbg!(buf.len(), hasher.finish());
+    //             buf
+    //         }
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     self.root.load(&mut buf);
+    //     assert_eq!(buf.len(), 0);
+    //     self.blob = bincode::deserialize_from(BufReader::new(
+    //         File::open("./files/blob.bin").expect("Failed to open blob.bin"),
+    //     ))
+    //     .expect("Failed to deserialize blob");
+    //     let mut hasher = DefaultHasher::new();
+    //     let bytes = as_bytes(&self.blob);
+    //     bytes.hash(&mut hasher);
+    //     println!("Deserialized blob with hash {}", hasher.finish());
+    //     println!("Loaded root in {}ms", start.elapsed().as_millis());
+    // }
 
     pub fn perform_iter(&mut self, iter: usize) {
         // let mut flops = self

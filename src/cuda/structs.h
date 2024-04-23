@@ -5,7 +5,7 @@
 #ifndef POKERRUST_STRUCTS_H
 #define POKERRUST_STRUCTS_H
 
-#define DataType float
+#define DataType double
 #define TPB 256
 #define ITERS 6
 #define ABSTRACTIONS 256

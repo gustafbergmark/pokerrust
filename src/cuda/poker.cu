@@ -211,6 +211,7 @@ evaluate_showdown(Vector *opponent_range, DataType bucket_reach, DataType player
                   short *eval, short *coll_vec, DataType bet, short *abstractions, bool calc_exploit,
                   DataType *reach_probs) {
     // Setup
+    bet = 1;
     int tid = threadIdx.x;
     __shared__ Vector sorted_range[1];
     reach_probs[tid] = bucket_reach;
@@ -306,6 +307,7 @@ __device__ DataType
 evaluate_fold(Vector *opponent_range, DataType opponent_reach, DataType player_reach, short *card_indexes, DataType bet,
               Vector *result, short *abstractions, bool calc_exploit, DataType *reach_probs) {
     __shared__ DataType card_collisions[52];
+    bet = 1;
     // Setup
     int tid = threadIdx.x;
     reach_probs[tid] = opponent_reach;

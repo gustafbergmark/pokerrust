@@ -182,6 +182,8 @@ int build_river_cuda(long cards, DataType bet, Builder *builder) {
         }
         //printf("index: %d\n", start); // 567
         free(root);
+    } else {
+        printf("shouldnt happen 12323\n");
     }
     builder->current_index += 1;
     return start;
