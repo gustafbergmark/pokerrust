@@ -278,11 +278,11 @@ impl<const M: usize> Evaluator<M> {
                 }
 
                 let phs = phs(&result, &self.card_order, num_hand);
-                let abstractions = phs
+                let abstractions: Vec<u16> = phs
                     .into_iter()
-                    .map(|elem| (elem * M as f32) as u16)
+                    .map(|elem| (elem * (M - 1) as f32) as u16)
                     .collect();
-
+                assert!(*abstractions.iter().max().unwrap() < M as u16);
                 (num_hand, result, coll_vec, abstractions)
             })
             .collect::<Vec<_>>();
