@@ -10,8 +10,8 @@
 #define ITERS 6
 #define ABSTRACTIONS 256
 #define CUTOFF 1e-4
-#define TURNS 6
-#define RIVERS 6
+#define TURNS 49
+#define RIVERS 48
 
 enum TerminalState {
     NonTerminal,

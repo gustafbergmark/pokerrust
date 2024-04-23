@@ -16,7 +16,7 @@ fn main() {
     let start = Instant::now();
     let mut game: Game<256> = builder::fixed_flop_poker();
     //game.load();
-    for i in 1..=1 {
+    for i in 1..=1000 {
         game.perform_iter(i);
     }
     //game.save();

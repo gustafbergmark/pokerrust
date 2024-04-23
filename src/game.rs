@@ -17,8 +17,8 @@ use std::hash::{Hash, Hasher};
 use std::io::{BufReader, BufWriter};
 use std::time::Instant;
 
-pub const TURNS: usize = 6;
-pub const RIVERS: usize = 6;
+pub const TURNS: usize = 49;
+pub const RIVERS: usize = 48;
 
 pub const FLOP_STRATEGY_SIZE: usize = 63 * 9 * 26 * 256;
 
@@ -104,43 +104,50 @@ impl<const M: usize> Game<M> {
     }
 
     pub fn perform_iter(&mut self, iter: usize) {
-        let mut flops = self
-            .evaluator
-            .flops
-            .clone()
-            .into_iter()
-            .enumerate()
-            .collect::<Vec<_>>();
-        flops.shuffle(&mut thread_rng());
+        // let mut flops = self
+        //     .evaluator
+        //     .flops
+        //     .clone()
+        //     .into_iter()
+        //     .enumerate()
+        //     .collect::<Vec<_>>();
+        // flops.shuffle(&mut thread_rng());
+        let flops = vec![(0, 7)]; // Test with first possible flop
         let mut count = 0;
         for &(index, flop) in &flops {
             count += 1;
-            println!(
-                "Starting iteration on fixed flop {:?}, number {count}",
-                self.evaluator.u64_to_cards(flop),
-            );
             let _start = Instant::now();
             let mut turns = vec![];
             let mut rivers = vec![];
             let mut gputime = 0;
-            for _ in 0..TURNS {
-                let deck = Card::generate_shuffled_deck()
-                    .into_iter()
-                    .filter(|&&elem| self.evaluator.cards_to_u64(&[elem]) & flop == 0)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                turns.push(self.evaluator.cards_to_u64(&[deck[0]]));
-                for i in 1..=RIVERS {
-                    rivers.push(self.evaluator.cards_to_u64(&[deck[i]]))
+            // for _ in 0..TURNS {
+            //     let deck = Card::generate_shuffled_deck()
+            //         .into_iter()
+            //         .filter(|&&elem| self.evaluator.cards_to_u64(&[elem]) & flop == 0)
+            //         .cloned()
+            //         .collect::<Vec<_>>();
+            //     turns.push(self.evaluator.cards_to_u64(&[deck[0]]));
+            //     for i in 1..=RIVERS {
+            //         rivers.push(self.evaluator.cards_to_u64(&[deck[i]]))
+            //     }
+            // }
+            for i in 0..52 {
+                let turn = 1_u64 << i;
+                if turn & flop > 0 {
+                    continue;
+                }
+                turns.push(turn);
+                for j in 0..52 {
+                    let river = 1_u64 << j;
+                    if (river & (turn | flop)) > 0 {
+                        continue;
+                    }
+                    rivers.push(river);
                 }
             }
             assert_eq!(turns.len(), TURNS);
             assert_eq!(rivers.len(), TURNS * RIVERS);
             self.evaluator.get_flop_eval(flop, &turns, &rivers, true);
-            println!(
-                "Flop eval created in in {}s",
-                _start.elapsed().as_secs_f32()
-            );
             let eval_ptr = Pointer(transfer_flop_eval(
                 &self.evaluator,
                 flop,
@@ -152,26 +159,8 @@ impl<const M: usize> Game<M> {
                 self.builder,
                 &self.blob[FLOP_STRATEGY_SIZE * index..FLOP_STRATEGY_SIZE * (index + 1)],
             );
-            for iter in 1..=1000 {
-                if cfg!(feature = "GPU") {
-                    let _ = self.root.evaluate_state(
-                        &Vector::ones(),
-                        &Vector::ones(),
-                        &self.evaluator,
-                        Small,
-                        false,
-                        0,
-                        self.builder,
-                        true,
-                        flop,
-                        &turns,
-                        &mut 0,
-                    );
-                    let s = Instant::now();
-                    evaluate_gpu(self.builder, eval_ptr, Small, false);
-                    gputime += s.elapsed().as_millis();
-                }
-                let val1 = self.root.evaluate_state(
+            if cfg!(feature = "GPU") {
+                let _ = self.root.evaluate_state(
                     &Vector::ones(),
                     &Vector::ones(),
                     &self.evaluator,
@@ -179,32 +168,31 @@ impl<const M: usize> Game<M> {
                     false,
                     0,
                     self.builder,
-                    false,
+                    true,
                     flop,
                     &turns,
                     &mut 0,
                 );
+                let s = Instant::now();
+                evaluate_gpu(self.builder, eval_ptr, Small, false);
+                gputime += s.elapsed().as_millis();
+            }
+            let val1 = self.root.evaluate_state(
+                &Vector::ones(),
+                &Vector::ones(),
+                &self.evaluator,
+                Small,
+                false,
+                0,
+                self.builder,
+                false,
+                flop,
+                &turns,
+                &mut 0,
+            );
 
-                if cfg!(feature = "GPU") {
-                    let _ = self.root.evaluate_state(
-                        &Vector::ones(),
-                        &Vector::ones(),
-                        &self.evaluator,
-                        Big,
-                        false,
-                        0,
-                        self.builder,
-                        true,
-                        flop,
-                        &turns,
-                        &mut 0,
-                    );
-                    let s = Instant::now();
-                    evaluate_gpu(self.builder, eval_ptr, Big, false);
-                    gputime += s.elapsed().as_millis();
-                }
-
-                let val2 = self.root.evaluate_state(
+            if cfg!(feature = "GPU") {
+                let _ = self.root.evaluate_state(
                     &Vector::ones(),
                     &Vector::ones(),
                     &self.evaluator,
@@ -212,37 +200,40 @@ impl<const M: usize> Game<M> {
                     false,
                     0,
                     self.builder,
-                    false,
+                    true,
                     flop,
                     &turns,
                     &mut 0,
                 );
-                println!(
-                    "Iteration time: {}s, GPU time {}ms, sum of values: {} {}",
-                    _start.elapsed().as_secs_f32(),
-                    gputime,
-                    val1.sum() * 1000.0 / 1326.0 / 1255.0,
-                    val2.sum() * 1000.0 / 1326.0 / 1255.0
-                );
-                let iter_time = _start.elapsed().as_secs_f32();
-                if iter % 10 == 0 {
-                    if cfg!(feature = "GPU") {
-                        let _ = self.root.evaluate_state(
-                            &Vector::ones(),
-                            &Vector::ones(),
-                            &self.evaluator,
-                            Small,
-                            true,
-                            0,
-                            self.builder,
-                            true,
-                            flop,
-                            &vec![],
-                            &mut 0,
-                        );
-                        evaluate_gpu(self.builder, eval_ptr, Small, true);
-                    }
-                    let exp_sb = self.root.evaluate_state(
+                let s = Instant::now();
+                evaluate_gpu(self.builder, eval_ptr, Big, false);
+                gputime += s.elapsed().as_millis();
+            }
+
+            let val2 = self.root.evaluate_state(
+                &Vector::ones(),
+                &Vector::ones(),
+                &self.evaluator,
+                Big,
+                false,
+                0,
+                self.builder,
+                false,
+                flop,
+                &turns,
+                &mut 0,
+            );
+            // println!(
+            //     "Iteration time: {}s, GPU time {}ms, sum of values: {} {}",
+            //     _start.elapsed().as_secs_f32(),
+            //     gputime,
+            //     val1.sum() * 1000.0 / 1326.0 / 1255.0,
+            //     val2.sum() * 1000.0 / 1326.0 / 1255.0
+            // );
+            let iter_time = _start.elapsed().as_secs_f32();
+            if iter % 10 == 0 {
+                if cfg!(feature = "GPU") {
+                    let _ = self.root.evaluate_state(
                         &Vector::ones(),
                         &Vector::ones(),
                         &self.evaluator,
@@ -250,28 +241,28 @@ impl<const M: usize> Game<M> {
                         true,
                         0,
                         self.builder,
-                        false,
+                        true,
                         flop,
                         &vec![],
                         &mut 0,
                     );
-                    if cfg!(feature = "GPU") {
-                        let _ = self.root.evaluate_state(
-                            &Vector::ones(),
-                            &Vector::ones(),
-                            &self.evaluator,
-                            Big,
-                            true,
-                            0,
-                            self.builder,
-                            true,
-                            flop,
-                            &vec![],
-                            &mut 0,
-                        );
-                        evaluate_gpu(self.builder, eval_ptr, Big, true);
-                    }
-                    let exp_bb = self.root.evaluate_state(
+                    evaluate_gpu(self.builder, eval_ptr, Small, true);
+                }
+                let exp_sb = self.root.evaluate_state(
+                    &Vector::ones(),
+                    &Vector::ones(),
+                    &self.evaluator,
+                    Small,
+                    true,
+                    0,
+                    self.builder,
+                    false,
+                    flop,
+                    &vec![],
+                    &mut 0,
+                );
+                if cfg!(feature = "GPU") {
+                    let _ = self.root.evaluate_state(
                         &Vector::ones(),
                         &Vector::ones(),
                         &self.evaluator,
@@ -279,23 +270,38 @@ impl<const M: usize> Game<M> {
                         true,
                         0,
                         self.builder,
-                        false,
+                        true,
                         flop,
                         &vec![],
                         &mut 0,
                     );
-                    println!(
-                        "Iteration {} done \n\
+                    evaluate_gpu(self.builder, eval_ptr, Big, true);
+                }
+                let exp_bb = self.root.evaluate_state(
+                    &Vector::ones(),
+                    &Vector::ones(),
+                    &self.evaluator,
+                    Big,
+                    true,
+                    0,
+                    self.builder,
+                    false,
+                    flop,
+                    &vec![],
+                    &mut 0,
+                );
+                println!(
+                    "Iteration {} done \n\
                           Exploitability: {} mb/h \n\
                           Iter time: {} \n\
                           Exploit calc time: {} \n",
-                        iter,
-                        (exp_sb.sum() + exp_bb.sum()) * 1000.0 / 1326.0 / 1255.0 / 2.0, // 1000 for milli, 1326 for own hands, 1255 for opponent, 2 for two strategies
-                        iter_time,
-                        _start.elapsed().as_secs_f32() - iter_time,
-                    );
-                }
+                    iter,
+                    (exp_sb.sum() + exp_bb.sum()) * 1000.0 / 1326.0 / 1255.0 / 2.0, // 1000 for milli, 1326 for own hands, 1255 for opponent, 2 for two strategies
+                    iter_time,
+                    _start.elapsed().as_secs_f32() - iter_time,
+                );
             }
+
             free_eval(eval_ptr);
             download_strategy_gpu(
                 self.builder,

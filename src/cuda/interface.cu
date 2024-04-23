@@ -32,10 +32,6 @@ void evaluate_cuda(Builder *builder,
         printf("Setup error: %s\n", cudaGetErrorString(err));
         fflush(stdout);
     }
-//    for(int i = 0; i < 1326; i++) {
-//        printf("%d %f\n", i, builder->communication[0].values[i]);
-//    }
-//    fflush(stdout);
     evaluate_all<<< 63 * evaluated_turns * 9, TPB>>>(builder->opponent_ranges, builder->results, builder->device_states,
                                                      evaluator,
                                                      updating_player == 0 ? Small : Big, calc_exploit, device_scratch);
@@ -58,20 +54,7 @@ void evaluate_cuda(Builder *builder,
                cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
     cudaFree(device_scratch);
-    err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("Aggregation error: %s\n", cudaGetErrorString(err));
-        fflush(stdout);
-    }
-    for (int i = 0; i < 63 * evaluated_turns * 9; i++) {
-        for (int j = 0; j < 1326; j++) {
-            if (!(abs(builder->communication[i].values[j]) < 125500)) {
-                printf("C++ impossible range values %f %s\n", builder->communication[i].values[j],
-                       calc_exploit ? "true" : "false");
-                exit(7);
-            }
-        }
-    }
+
     fflush(stdout);
 
 }

@@ -363,6 +363,7 @@ impl<const M: usize> State<M> {
                 };
                 for &num_turn in &evaluated_turns {
                     if num_turn & communal_cards > 0 {
+                        assert!(calc_exploit);
                         continue;
                     }
                     let new_cards = communal_cards | num_turn;
@@ -401,11 +402,10 @@ impl<const M: usize> State<M> {
                     next_state.apply_updates(updating_player);
                 }
                 assert_eq!(count, if calc_exploit { 49 } else { TURNS as i32 });
-                total * (1.0 / TURNS as Float)
+                total * (1.0 / (count as Float))
             }
             River => {
                 if cfg!(feature = "GPU") {
-                    let evaluated_turns = if calc_exploit { 49 } else { TURNS };
                     if upload {
                         upload_gpu(builder, *communication_index as i32, opponent_range);
                         *communication_index += 1;
