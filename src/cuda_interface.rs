@@ -115,45 +115,47 @@ pub fn transfer_flop_eval<const M: usize>(
         abstractions2[card_index * 1326..(card_index + 1) * 1326].copy_from_slice(&a);
     }
 
-    let mut evals = vec![];
-    let mut collisions = vec![];
-    let mut abstractions = vec![];
-    let mut cards = 3;
-    for _ in 0..1326 {
-        if (communal_cards & cards) > 0 {
-            let mut e = vec![0; 1326 + 256 * 2];
-            evals.append(&mut e);
-            let mut c = vec![0; 52 * 51];
-            collisions.append(&mut c);
-            let mut a = vec![0; 1326];
-            abstractions.append(&mut a);
-        } else {
-            assert_eq!((communal_cards | cards).count_ones(), 5);
-            // Inverse eval for GPU memory coalescing
-            let e = eval.vectorized_eval(communal_cards | cards).clone();
-            let mut inverse = e.clone();
-            for (i, &val) in e[..1326].into_iter().enumerate() {
-                inverse[(val & 2047) as usize] &= 2048;
-                inverse[(val & 2047) as usize] |= i as u16;
-            }
-            evals.append(&mut inverse);
-            //evals.extend_from_slice(&e);
-
-            let mut c = eval.collisions(communal_cards | cards).clone();
-            collisions.append(&mut c);
-            let mut a = eval.abstractions(communal_cards | cards).clone();
-            abstractions.append(&mut a);
-        }
-
-        cards = CombinationMap::<(), 52, 2>::next(cards);
-    }
-    assert_eq!(evals, evals2);
-    assert_eq!(collisions, collisions2);
-    assert_eq!(abstractions, abstractions2);
+    // let mut evals = vec![];
+    // let mut collisions = vec![];
+    // let mut abstractions = vec![];
+    // let mut cards = 3;
+    // for _ in 0..1326 {
+    //     if (communal_cards & cards) > 0 {
+    //         let mut e = vec![0; 1326 + 256 * 2];
+    //         evals.append(&mut e);
+    //         let mut c = vec![0; 52 * 51];
+    //         collisions.append(&mut c);
+    //         let mut a = vec![0; 1326];
+    //         abstractions.append(&mut a);
+    //     } else {
+    //         assert_eq!((communal_cards | cards).count_ones(), 5);
+    //         // Inverse eval for GPU memory coalescing
+    //         let e = eval.vectorized_eval(communal_cards | cards).clone();
+    //         let mut inverse = e.clone();
+    //         for (i, &val) in e[..1326].into_iter().enumerate() {
+    //             inverse[(val & 2047) as usize] &= 2048;
+    //             inverse[(val & 2047) as usize] |= i as u16;
+    //         }
+    //         evals.append(&mut inverse);
+    //         //evals.extend_from_slice(&e);
+    //
+    //         let mut c = eval.collisions(communal_cards | cards).clone();
+    //         collisions.append(&mut c);
+    //         let mut a = eval.abstractions(communal_cards | cards).clone();
+    //         abstractions.append(&mut a);
+    //     }
+    //
+    //     cards = CombinationMap::<(), 52, 2>::next(cards);
+    // }
+    // assert_eq!(evals, evals2);
+    // assert_eq!(collisions, collisions2);
+    // assert_eq!(abstractions, abstractions2);
 
     assert_eq!(evals2.len(), 1326 * (1326 + 256 * 2));
     assert_eq!(collisions2.len(), 1326 * 52 * 51);
     assert_eq!(abstractions2.len(), 1326 * 1326);
+    assert_eq!(turns.len(), 49);
+    assert_eq!(rivers.len(), 49 * 48);
     let res = unsafe {
         transfer_flop_eval_cuda(
             communal_cards,

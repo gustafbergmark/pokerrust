@@ -211,7 +211,6 @@ evaluate_showdown(Vector *opponent_range, DataType bucket_reach, DataType player
                   short *eval, short *coll_vec, DataType bet, short *abstractions, bool calc_exploit,
                   DataType *reach_probs) {
     // Setup
-    bet = 1;
     int tid = threadIdx.x;
     __shared__ Vector sorted_range[1];
     reach_probs[tid] = bucket_reach;
@@ -307,7 +306,6 @@ __device__ DataType
 evaluate_fold(Vector *opponent_range, DataType opponent_reach, DataType player_reach, short *card_indexes, DataType bet,
               Vector *result, short *abstractions, bool calc_exploit, DataType *reach_probs) {
     __shared__ DataType card_collisions[52];
-    bet = 1;
     // Setup
     int tid = threadIdx.x;
     reach_probs[tid] = opponent_reach;
@@ -578,36 +576,22 @@ __global__ void evaluate_all(Vector *opponent_ranges, Vector *results, State *ro
                              Player updating_player, bool calc_exploit, Vector *scratches) {
     int block = blockIdx.x;
     int evaluated_turns = calc_exploit ? 49 : TURNS;
-    int evaluated_rivers = calc_exploit ? 52 : RIVERS;
+    int evaluated_rivers = calc_exploit ? 48 : RIVERS;
     Vector *opponent_range = opponent_ranges + block;
     Vector *result = results + block;
     State *state = root_states + 28 * (block / evaluated_turns);
     Vector *scratch = scratches + 10 * block;
     State *next = state->next_states[0];
 
-    // Hacky way of finding turn card
     int turn_index = block % evaluated_turns;
-    long turn = 0;
-    if (calc_exploit) {
-        for (int i = 0; (i < turn_index) || ((1l << turn) & evaluator->flop); turn++) {
-            if (!((1l << turn) & evaluator->flop)) {
-                i++;
-            }
-        }
-        turn = 1l << turn;
-    } else {
-        turn = evaluator->turns[turn_index];
-    }
+    long turn = evaluator->turns[turn_index];
+
     long cards = evaluator->flop | turn;
 
     for (int c = 0; c < evaluated_rivers; c++) {
-        long river;
-        if (calc_exploit) {
-            river = 1l << c;
-        } else {
-            river = evaluator->rivers[c + turn_index * RIVERS];
-        }
-        if (river & cards) continue;
+        long river = evaluator->rivers[c + turn_index * evaluated_rivers];
+        if (river & cards) printf("%llu %llu %llu\n", river, turn, evaluator->flop);
+        assert((river & cards) == 0);
         Vector *new_range = scratch;
         copy(opponent_range, new_range);
         remove_collisions(new_range, river | cards);
@@ -615,12 +599,6 @@ __global__ void evaluate_all(Vector *opponent_ranges, Vector *results, State *ro
         int eval_index = get_index(set);
         short *eval = evaluator->eval + eval_index * (1326 + 256 * 2);
         short *coll_vec = evaluator->coll_vec + eval_index * 52 * 51;
-        if ((block == 0) && (threadIdx.x == 0)) {
-            for (int i = 0; i < 1326; i++) {
-                if (!((new_range->values[i] >= 0) && (new_range->values[i] <= 1)))
-                    printf("wrong input %f\n", new_range->values[i]);
-            }
-        }
 
         evaluate_river(new_range, next, scratch + 1, cards | river, evaluator->card_indexes, eval,
                        coll_vec, evaluator->abstractions + eval_index * 1326,

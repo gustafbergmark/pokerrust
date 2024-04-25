@@ -5,13 +5,13 @@
 #ifndef POKERRUST_STRUCTS_H
 #define POKERRUST_STRUCTS_H
 
-#define DataType double
+#define DataType float
 #define TPB 256
 #define ITERS 6
 #define ABSTRACTIONS 256
 #define CUTOFF 1e-4
 #define TURNS 49
-#define RIVERS 48
+#define RIVERS 3
 
 enum TerminalState {
     NonTerminal,

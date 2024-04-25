@@ -9,8 +9,8 @@
 
 struct Evaluator {
     long flop;
-    long turns[TURNS];
-    long rivers[TURNS * RIVERS];
+    long turns[49];
+    long rivers[49 * 48];
     long card_order[1326];
     short card_indexes[52 * 51];
     short eval[(1326 + 256 * 2) * 1326];

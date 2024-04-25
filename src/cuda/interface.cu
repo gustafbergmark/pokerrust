@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <filesystem>
 #include <iostream>
+#include <bit>
 
 
 extern "C" {
@@ -64,8 +65,8 @@ Evaluator *transfer_flop_eval_cuda(long flop, long *card_order, short *card_inde
     Evaluator *device_eval;
     cudaMalloc(&device_eval, sizeof(Evaluator));
     cudaMemcpy(&device_eval->flop, &flop, sizeof(long), cudaMemcpyHostToDevice);
-    cudaMemcpy(&device_eval->turns, turns, TURNS * sizeof(long), cudaMemcpyHostToDevice);
-    cudaMemcpy(&device_eval->rivers, rivers, TURNS * RIVERS * sizeof(long), cudaMemcpyHostToDevice);
+    cudaMemcpy(&device_eval->turns, turns, 49 * sizeof(long), cudaMemcpyHostToDevice);
+    cudaMemcpy(&device_eval->rivers, rivers, 49 * 48 * sizeof(long), cudaMemcpyHostToDevice);
     cudaMemcpy(&device_eval->card_order, card_order, 1326 * sizeof(long), cudaMemcpyHostToDevice);
     cudaMemcpy(&device_eval->card_indexes, card_indexes, 52 * 51 * sizeof(short), cudaMemcpyHostToDevice);
     cudaMemcpy(&device_eval->eval, eval, 1326 * (1326 + 256 * 2) * sizeof(short), cudaMemcpyHostToDevice);
@@ -184,6 +185,7 @@ int build_river_cuda(long cards, DataType bet, Builder *builder) {
         free(root);
     } else {
         printf("shouldnt happen 12323\n");
+        fflush(stdout);
     }
     builder->current_index += 1;
     return start;

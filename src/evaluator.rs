@@ -87,6 +87,7 @@ impl<const M: usize> Evaluator<M> {
                 }
             }
             flops.push(Self::cards_to_u64_inner(&flop, &card_nums));
+            //dbg!(flops.last().unwrap(), &flop);
         }
         let turn_abstractions = match std::fs::read("./files/turn_abstractions.bin") {
             Ok(eval) => bincode::deserialize(&eval).expect("Failed to deserialize"),

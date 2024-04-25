@@ -11,7 +11,7 @@ use crate::vector::{Float, Vector};
 use assert_approx_eq::assert_approx_eq;
 use itertools::Itertools;
 use poker::Suit::*;
-use poker::{Card, Suit};
+use poker::{Card, Rank, Suit};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 use std::ffi::c_void;
@@ -144,11 +144,17 @@ impl<const M: usize> State<M> {
             DealFlop => {
                 let deck = Card::generate_deck();
                 //let flops = deck.combinations(3); // Full game
-                let flops = deck.take(3).combinations(3); // Fixed flop game
+                // let flops = deck.take(3).combinations(3); // Fixed flop game
+                let flops = vec![vec![
+                    Card::new(Rank::King, Suit::Hearts),
+                    Card::new(Rank::Eight, Suit::Hearts),
+                    Card::new(Rank::Six, Suit::Clubs),
+                ]];
                 let mut set: HashSet<u64> = HashSet::new();
                 let mut next_states = Vec::new();
                 for flop in flops {
                     let num_flop = evaluator.cards_to_u64(&flop);
+                    assert!(evaluator.flops.contains(&num_flop));
                     if set.contains(&num_flop) {
                         continue;
                     }
@@ -231,7 +237,7 @@ impl<const M: usize> State<M> {
         upload: bool,
         fixed_flop: u64,
         turns: &Vec<u64>,
-        communication_index: &mut usize,
+        turn_index: usize,
     ) -> Vector {
         //(util of sb, util of bb, exploitability of updating player)
         let opponent_range = match updating_player {
@@ -264,7 +270,7 @@ impl<const M: usize> State<M> {
                             upload,
                             fixed_flop,
                             turns,
-                            communication_index,
+                            turn_index,
                         ),
 
                         Big => next.evaluate_state(
@@ -278,7 +284,7 @@ impl<const M: usize> State<M> {
                             upload,
                             fixed_flop,
                             turns,
-                            communication_index,
+                            turn_index,
                         ),
                     };
 
@@ -314,7 +320,7 @@ impl<const M: usize> State<M> {
                 let mut total = Vector::default();
                 let mut count = 0.0;
                 for next_state in self.next_states.iter_mut() {
-                    if next_state.cards == fixed_flop || fixed_flop == 0 || true {
+                    if next_state.cards == fixed_flop {
                         let mut new_sb_range = *sb_range;
                         let mut new_bb_range = *bb_range;
                         // It is impossible to have hands which contains flop cards
@@ -335,7 +341,7 @@ impl<const M: usize> State<M> {
                             upload,
                             fixed_flop,
                             turns,
-                            communication_index,
+                            turn_index,
                         );
                         // For safety for the future
                         for i in 0..1326 {
@@ -356,17 +362,19 @@ impl<const M: usize> State<M> {
                 assert_eq!(self.next_states.len(), 1);
                 let next_state = &mut self.next_states[0];
                 let mut count = 0;
+                let all_turns: Vec<_> = (0..52).map(|elem| 1_u64 << elem).collect();
                 let evaluated_turns = if calc_exploit {
-                    (0..52).map(|elem| 1_u64 << elem).collect()
+                    &all_turns[..]
                 } else {
-                    turns.clone()
+                    &turns[..TURNS]
                 };
-                for &num_turn in &evaluated_turns {
+                for &num_turn in evaluated_turns {
                     if num_turn & communal_cards > 0 {
                         assert!(calc_exploit);
                         continue;
                     }
                     let new_cards = communal_cards | num_turn;
+                    assert_eq!(new_cards.count_ones(), 4);
                     let mut new_sb_range = *sb_range;
                     let mut new_bb_range = *bb_range;
                     // It is impossible to have hands which contains flop cards
@@ -387,7 +395,7 @@ impl<const M: usize> State<M> {
                         upload,
                         fixed_flop,
                         turns,
-                        communication_index,
+                        count as usize,
                     );
                     for i in 0..1326 {
                         if (evaluator.card_order()[i] & new_cards) > 0 {
@@ -406,23 +414,28 @@ impl<const M: usize> State<M> {
             }
             River => {
                 let gpu_res = if upload {
-                    upload_gpu(builder, *communication_index as i32, opponent_range);
-                    *communication_index += 1;
+                    upload_gpu(
+                        builder,
+                        self.gpu_pointer.unwrap() * TURNS as i32 + turn_index as i32,
+                        opponent_range,
+                    );
                     for e in opponent_range.values {
                         assert!(!e.is_nan())
                     }
                     // No updates during upload, return does not matter
                     Vector::default()
                 } else {
-                    let v = download_gpu(builder, *communication_index as i32);
-                    *communication_index += 1;
+                    let v = download_gpu(
+                        builder,
+                        self.gpu_pointer.unwrap() * TURNS as i32 + turn_index as i32,
+                    );
                     for e in v.values {
                         assert!(!e.is_nan())
                     }
                     v
                 };
 
-                if !upload && true {
+                if !upload && false {
                     let mut total = Vector::default();
                     assert_eq!(self.next_states.len(), 1);
                     let next_state = &mut self.next_states[0];
@@ -454,7 +467,7 @@ impl<const M: usize> State<M> {
                             upload,
                             fixed_flop,
                             turns,
-                            communication_index,
+                            turn_index,
                         );
                         for i in 0..1326 {
                             if (evaluator.card_order()[i] & new_cards) > 0 {
@@ -475,6 +488,7 @@ impl<const M: usize> State<M> {
                         }
                         assert_approx_eq!(gpu_res[i], total[i]);
                     }
+                    println!("SUCCESS");
                 }
                 gpu_res
             }
