@@ -368,6 +368,9 @@ impl<const M: usize> State<M> {
                 } else {
                     &turns[..TURNS]
                 };
+                if !calc_exploit {
+                    assert_eq!(evaluated_turns.len(), TURNS);
+                }
                 for &num_turn in evaluated_turns {
                     if num_turn & communal_cards > 0 {
                         assert!(calc_exploit);
@@ -413,10 +416,12 @@ impl<const M: usize> State<M> {
                 total * (1.0 / (count as Float))
             }
             River => {
+                let evaluated_turns = if calc_exploit { 49 } else { TURNS };
+                assert!(turn_index < evaluated_turns);
                 let gpu_res = if upload {
                     upload_gpu(
                         builder,
-                        self.gpu_pointer.unwrap() * TURNS as i32 + turn_index as i32,
+                        self.gpu_pointer.unwrap() * evaluated_turns as i32 + turn_index as i32,
                         opponent_range,
                     );
                     for e in opponent_range.values {
@@ -427,7 +432,7 @@ impl<const M: usize> State<M> {
                 } else {
                     let v = download_gpu(
                         builder,
-                        self.gpu_pointer.unwrap() * TURNS as i32 + turn_index as i32,
+                        self.gpu_pointer.unwrap() * evaluated_turns as i32 + turn_index as i32,
                     );
                     for e in v.values {
                         assert!(!e.is_nan())

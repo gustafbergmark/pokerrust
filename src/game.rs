@@ -17,8 +17,8 @@ use std::hash::{Hash, Hasher};
 use std::io::{BufReader, BufWriter};
 use std::time::Instant;
 
-pub const TURNS: usize = 49;
-pub const RIVERS: usize = 3;
+pub const TURNS: usize = 6;
+pub const RIVERS: usize = 6;
 
 pub const FLOP_STRATEGY_SIZE: usize = 63 * 9 * 26 * 256;
 
@@ -104,7 +104,7 @@ impl<const M: usize> Game<M> {
     // }
 
     pub fn perform_iter(&mut self, iter: usize) {
-        let calc_exploit = iter % 10 == 0;
+        let calc_exploit = iter % 100 == 0;
         // let mut flops = self
         //     .evaluator
         //     .flops
@@ -250,6 +250,8 @@ impl<const M: usize> Game<M> {
                     (res_sb.sum() + res_bb.sum()) * 1000.0 / 1326.0 / 1255.0 / 2.0, // 1000 for milli, 1326 for own hands, 1255 for opponent, 2 for two strategies
                     _start.elapsed().as_secs_f32(),
                 );
+            } else {
+                //println!("Iter time: {}ms", _start.elapsed().as_millis());
             }
 
             free_eval(eval_ptr);
