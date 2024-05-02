@@ -22,7 +22,7 @@ pub(crate) fn fixed_flop_poker<const M: usize>() -> Game<M> {
     // Raises = 1 since original bb counts as raise
     let builder = initialize_builder();
 
-    let _states = build(&mut root, &evaluator, 1, builder);
+    let _states = build(&mut root, &evaluator, 1, builder, &mut 0);
     println!(
         "Game created in {} seconds with {} states",
         start.elapsed().as_secs_f32(),
@@ -36,6 +36,7 @@ fn build<const M: usize>(
     evaluator: &Evaluator<M>,
     raises: u8,
     builder: Pointer,
+    gpu_index: &mut usize,
 ) -> usize {
     let mut count = 1;
     for action in possible_actions(state, raises) {
@@ -44,10 +45,25 @@ fn build<const M: usize>(
             DealHole | DealFlop | DealTurn | DealRiver => 0,
             _ => raises,
         };
-        for mut next_state in state.get_action(action, evaluator, builder) {
-            count += build(&mut next_state, evaluator, new_raises, builder);
+        let new_gpu_index = &mut gpu_index.clone();
+
+        let mut end_index = *gpu_index;
+        for mut next_state in state.get_action(action, evaluator, builder, new_gpu_index) {
+            count += build(
+                &mut next_state,
+                evaluator,
+                new_raises,
+                builder,
+                new_gpu_index,
+            );
             state.add_action(next_state);
+            // Save the new gpu pointer and reset pointer for next possible flop
+            end_index = *new_gpu_index;
+            if action == DealFlop {
+                *new_gpu_index = *gpu_index;
+            }
         }
+        *gpu_index = end_index;
     }
     count
 }

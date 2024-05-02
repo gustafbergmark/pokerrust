@@ -13,13 +13,10 @@ mod strategy;
 mod vector;
 
 fn main() {
-    let start = Instant::now();
     let mut game: Game<256> = builder::fixed_flop_poker();
-    //game.load();
-    for i in 1..=1000 {
+    game.load();
+    for i in 200..=300 {
         game.perform_iter(i);
     }
-    //game.save();
-    //dbg!(&game);
-    dbg!(start.elapsed().as_millis());
+    game.save();
 }

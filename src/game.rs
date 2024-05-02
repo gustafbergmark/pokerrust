@@ -41,84 +41,93 @@ impl<const M: usize> Game<M> {
             root,
             evaluator,
             builder,
-            blob: vec![0.0; 63 * 9 * 26 /* 1755*/ * 256], // todo
+            blob: vec![0.0; 63 * 9 * 26 * 1755 * 256],
         }
     }
 
-    // pub fn save(&self) {
-    //     println!("Saving game");
-    //     let mut buf = VecDeque::new();
-    //     self.root.save(&mut buf);
-    //     buf.make_contiguous();
-    //     let mut hasher = DefaultHasher::new();
-    //     assert_eq!(buf.len(), buf.as_slices().0.len());
-    //     as_bytes(buf.as_slices().0).hash(&mut hasher);
-    //     dbg!(buf.len(), hasher.finish());
-    //     match std::fs::write(
-    //         "./files/game.bin",
-    //         bincode::serialize(&buf).expect("Failed to serialize"),
-    //     ) {
-    //         Ok(_) => println!("Saved game"),
-    //         Err(e) => panic!("{}", e),
-    //     }
-    //     let blob = as_bytes(&self.blob);
-    //     hasher = DefaultHasher::new();
-    //     blob.hash(&mut hasher);
-    //     println!("Saving blob hash: {}", hasher.finish());
-    //
-    //     match bincode::serialize_into(
-    //         BufWriter::new(File::create("./files/blob.bin").expect("Failed to open file")),
-    //         &self.blob,
-    //     ) {
-    //         Ok(_) => println!("Saved blob"),
-    //         Err(e) => panic!("{}", e),
-    //     }
-    // }
-    //
-    // pub fn load(&mut self) {
-    //     let start = Instant::now();
-    //     let mut buf = match std::fs::read("./files/game.bin") {
-    //         Ok(eval) => {
-    //             let mut buf: VecDeque<Float> =
-    //                 bincode::deserialize(&eval).expect("Failed to deserialize");
-    //             buf.make_contiguous();
-    //             let mut hasher = DefaultHasher::new();
-    //             assert_eq!(buf.len(), buf.as_slices().0.len());
-    //             as_bytes(buf.as_slices().0).hash(&mut hasher);
-    //             dbg!(buf.len(), hasher.finish());
-    //             buf
-    //         }
-    //         Err(e) => panic!("{}", e),
-    //     };
-    //     self.root.load(&mut buf);
-    //     assert_eq!(buf.len(), 0);
-    //     self.blob = bincode::deserialize_from(BufReader::new(
-    //         File::open("./files/blob.bin").expect("Failed to open blob.bin"),
-    //     ))
-    //     .expect("Failed to deserialize blob");
-    //     let mut hasher = DefaultHasher::new();
-    //     let bytes = as_bytes(&self.blob);
-    //     bytes.hash(&mut hasher);
-    //     println!("Deserialized blob with hash {}", hasher.finish());
-    //     println!("Loaded root in {}ms", start.elapsed().as_millis());
-    // }
+    pub fn save(&self) {
+        println!("Saving game");
+        let mut buf = VecDeque::new();
+        self.root.save(&mut buf);
+        buf.make_contiguous();
+        let mut hasher = DefaultHasher::new();
+        assert_eq!(buf.len(), buf.as_slices().0.len());
+        as_bytes(buf.as_slices().0).hash(&mut hasher);
+        dbg!(buf.len(), hasher.finish());
+        match std::fs::write(
+            "./files/game.bin",
+            bincode::serialize(&buf).expect("Failed to serialize"),
+        ) {
+            Ok(_) => println!("Saved game"),
+            Err(e) => panic!("{}", e),
+        }
+        let blob = as_bytes(&self.blob);
+        hasher = DefaultHasher::new();
+        blob.hash(&mut hasher);
+        println!("Saving blob hash: {}", hasher.finish());
+
+        match bincode::serialize_into(
+            BufWriter::new(File::create("./files/blob.bin").expect("Failed to open file")),
+            &self.blob,
+        ) {
+            Ok(_) => println!("Saved blob"),
+            Err(e) => panic!("{}", e),
+        }
+    }
+
+    pub fn load(&mut self) {
+        let start = Instant::now();
+        let mut buf = match std::fs::read("./files/game_100.bin") {
+            Ok(eval) => {
+                let mut buf: VecDeque<Float> =
+                    bincode::deserialize(&eval).expect("Failed to deserialize");
+                buf.make_contiguous();
+                let mut hasher = DefaultHasher::new();
+                assert_eq!(buf.len(), buf.as_slices().0.len());
+                as_bytes(buf.as_slices().0).hash(&mut hasher);
+                dbg!(buf.len(), hasher.finish());
+                buf
+            }
+            Err(e) => panic!("{}", e),
+        };
+        self.root.load(&mut buf);
+        assert_eq!(buf.len(), 0);
+        self.blob = bincode::deserialize_from(BufReader::new(
+            File::open("./files/blob_100.bin").expect("Failed to open blob.bin"),
+        ))
+        .expect("Failed to deserialize blob");
+        let mut hasher = DefaultHasher::new();
+        let bytes = as_bytes(&self.blob);
+        bytes.hash(&mut hasher);
+        println!("Deserialized blob with hash {}", hasher.finish());
+        println!("Loaded root in {}ms", start.elapsed().as_millis());
+    }
 
     pub fn perform_iter(&mut self, iter: usize) {
-        let calc_exploit = iter % 100 == 0;
-        // let mut flops = self
-        //     .evaluator
-        //     .flops
-        //     .clone()
-        //     .into_iter()
-        //     .enumerate()
-        //     .collect::<Vec<_>>();
-        // flops.shuffle(&mut thread_rng());
+        let calc_exploit = iter % 10 == 0;
+        let _start = Instant::now();
+        let mut flops = self
+            .evaluator
+            .flops
+            .clone()
+            .into_iter()
+            .enumerate()
+            //.take(20)
+            .collect::<Vec<_>>();
+        flops.shuffle(&mut thread_rng());
         // let flops = vec![(0, 7)]; // Test with first possible flop
-        let flops = vec![(0, 17301520)]; // Test with first possible flop
+        // let flops = vec![(0, 17301520)]; // Test with first possible flop
+        let mut exploit_sum = 0.0;
+
+        // Approximate exploitability from 20 flops
+        let flops = if calc_exploit {
+            &flops[..20]
+        } else {
+            &flops[..]
+        };
         let mut count = 0;
-        for &(index, flop) in &flops {
+        for &(index, flop) in flops {
             count += 1;
-            let _start = Instant::now();
             let mut turns = vec![];
             let mut rivers = vec![];
             let mut gputime = 0;
@@ -242,22 +251,31 @@ impl<const M: usize> Game<M> {
             );
 
             if calc_exploit {
-                println!(
-                    "Iteration {} done \n\
-                          Exploitability: {} mb/h \n\
-                          Exploit calc time: {} \n",
-                    iter,
-                    (res_sb.sum() + res_bb.sum()) * 1000.0 / 1326.0 / 1255.0 / 2.0, // 1000 for milli, 1326 for own hands, 1255 for opponent, 2 for two strategies
-                    _start.elapsed().as_secs_f32(),
-                );
-            } else {
-                //println!("Iter time: {}ms", _start.elapsed().as_millis());
+                // 1326 for own hands, 1255 for opponent, 2 for two strategies
+                exploit_sum += (res_sb.sum() + res_bb.sum()) / 1326.0 / 1255.0 / 2.0;
             }
 
             free_eval(eval_ptr);
             download_strategy_gpu(
                 self.builder,
                 &mut self.blob[FLOP_STRATEGY_SIZE * index..FLOP_STRATEGY_SIZE * (index + 1)],
+            );
+            //println!("FLOP DONE")
+        }
+        if calc_exploit {
+            println!(
+                "Iteration {} done \n\
+                 Exploitability: {} mb/h \n\
+                 Exploitability calculation time {}s",
+                iter,
+                exploit_sum * 1000.0 / 20.0, // 20 for samples, 1000 for milli
+                _start.elapsed().as_secs_f32()
+            );
+        } else {
+            println!(
+                "Iteration {} done, time: {}s",
+                iter,
+                _start.elapsed().as_secs_f32()
             );
         }
     }

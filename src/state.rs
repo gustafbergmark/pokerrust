@@ -69,6 +69,7 @@ impl<const M: usize> State<M> {
         action: Action,
         evaluator: &Evaluator<M>,
         builder: Pointer,
+        gpu_index: &mut usize,
     ) -> Vec<State<M>> {
         let opponent = match self.next_to_act {
             Small => Big,
@@ -113,8 +114,20 @@ impl<const M: usize> State<M> {
                     0 => state.terminal = Flop,
                     3 => state.terminal = Turn,
                     4 => {
+                        // 29 is the first card combination which should only appear once for each flop
                         let gpu_pointer = if cfg!(feature = "GPU") {
-                            Some(build_river(self.cards, other_bet, builder))
+                            // The cards 29 should only appear once for each history, meaning we build
+                            // on GPU exactly one time
+                            let ptr = if self.cards == 29 {
+                                //println!("Building river on gpu");
+                                let ptr = build_river(self.cards, other_bet, builder);
+                                assert_eq!(ptr, *gpu_index as i32);
+                                ptr
+                            } else {
+                                *gpu_index as i32
+                            };
+                            *gpu_index += 1;
+                            Some(ptr)
                         } else {
                             None
                         };
@@ -143,21 +156,20 @@ impl<const M: usize> State<M> {
             }
             DealFlop => {
                 let deck = Card::generate_deck();
-                //let flops = deck.combinations(3); // Full game
-                // let flops = deck.take(3).combinations(3); // Fixed flop game
-                let flops = vec![vec![
-                    Card::new(Rank::King, Suit::Hearts),
-                    Card::new(Rank::Eight, Suit::Hearts),
-                    Card::new(Rank::Six, Suit::Clubs),
-                ]];
+                let flops = deck.combinations(3); // Full game
+                                                  // let flops = vec![vec![
+                                                  //     Card::new(Rank::King, Suit::Hearts),
+                                                  //     Card::new(Rank::Eight, Suit::Hearts),
+                                                  //     Card::new(Rank::Six, Suit::Clubs),
+                                                  // ]];
                 let mut set: HashSet<u64> = HashSet::new();
                 let mut next_states = Vec::new();
                 for flop in flops {
                     let num_flop = evaluator.cards_to_u64(&flop);
-                    assert!(evaluator.flops.contains(&num_flop));
                     if set.contains(&num_flop) {
                         continue;
                     }
+                    assert!(evaluator.flops.contains(&num_flop));
                     let mut possible_permutations: Vec<[Suit; 4]> = vec![];
                     let permutations = [Clubs, Hearts, Spades, Diamonds]
                         .into_iter()
@@ -203,7 +215,7 @@ impl<const M: usize> State<M> {
             }
             DealRiver => {
                 // Do not create river subgames on CPU if they are created on GPU
-                if cfg!(feature = "GPU") && false {
+                if cfg!(feature = "GPU") {
                     return vec![];
                 }
                 let deck = Card::generate_deck();
@@ -289,7 +301,9 @@ impl<const M: usize> State<M> {
                     };
 
                     if updating_player == self.next_to_act {
-                        if !calc_exploit {
+                        if !calc_exploit
+                        /*|| self.cards == 0*/
+                        {
                             results.push(utility);
                             average_strategy += utility * action_prob;
                         } else {
@@ -355,6 +369,7 @@ impl<const M: usize> State<M> {
                         }
                     }
                 }
+                assert!(count > 0.0);
                 total * (1.0 / count)
             }
             Turn => {
