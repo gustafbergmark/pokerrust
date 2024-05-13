@@ -15,7 +15,7 @@ mod vector;
 fn main() {
     let mut game: Game<256> = builder::fixed_flop_poker();
     game.load();
-    for i in 200..=300 {
+    for i in 0..=100 {
         game.perform_iter(i);
     }
     game.save();

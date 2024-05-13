@@ -112,11 +112,8 @@ impl<const M: usize> Game<M> {
             .clone()
             .into_iter()
             .enumerate()
-            //.take(20)
             .collect::<Vec<_>>();
         flops.shuffle(&mut thread_rng());
-        // let flops = vec![(0, 7)]; // Test with first possible flop
-        // let flops = vec![(0, 17301520)]; // Test with first possible flop
         let mut exploit_sum = 0.0;
 
         // Approximate exploitability from 20 flops
