@@ -27,7 +27,7 @@ impl<const M: usize> Game<M> {
         }
     }
 
-    pub fn perform_iter(&mut self, iter: usize) {
+    pub fn perform_iter(&mut self, iter: usize, iter_times: &mut Vec<f32>) {
         let _start = Instant::now();
         // 7 is the fixed flop
         let eval_ptr = Pointer(transfer_flop_eval(&self.evaluator, 7));
@@ -55,7 +55,6 @@ impl<const M: usize> Game<M> {
             self.builder,
             false,
         );
-        //println!("Iteration time: {}s", _start.elapsed().as_secs_f32());
 
         if cfg!(feature = "GPU") {
             let _ = self.root.evaluate_state(
@@ -70,7 +69,6 @@ impl<const M: usize> Game<M> {
             );
             evaluate_gpu(self.builder, eval_ptr, Big, false);
         }
-
         let _ = self.root.evaluate_state(
             &Vector::ones(),
             &Vector::ones(),
@@ -82,6 +80,7 @@ impl<const M: usize> Game<M> {
             false,
         );
         let iter_time = _start.elapsed().as_secs_f32();
+        iter_times.push(iter_time);
         if iter % 10 == 0 {
             if cfg!(feature = "GPU") {
                 let _ = self.root.evaluate_state(

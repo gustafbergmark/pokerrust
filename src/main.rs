@@ -1,4 +1,6 @@
 use crate::game::Game;
+use crate::vector::Float;
+use std::ffi::c_float;
 use std::time::Instant;
 
 mod builder;
@@ -13,13 +15,24 @@ mod strategy;
 mod vector;
 
 fn main() {
-    // Set heap size of gpu
-    //init_gpu();
     let mut game: Game<256> = builder::fixed_flop_poker();
-    let start = Instant::now();
-    for i in 1..=10000 {
-        game.perform_iter(i);
+    let mut times = vec![];
+    for i in 1..=10_000 {
+        game.perform_iter(i, &mut times);
     }
-    //dbg!(&game);
-    dbg!(start.elapsed().as_millis());
+    println!(
+        "Average: {}\n\
+        Standard deviation {}",
+        times.iter().sum::<f32>() / times.len() as f32,
+        stdev(&times),
+    );
+}
+
+fn stdev(values: &[Float]) -> Float {
+    let avg = values.iter().sum::<Float>() / values.len() as Float;
+    let mut stdev = 0.0;
+    for value in values {
+        stdev += (value - avg).powi(2);
+    }
+    return (stdev / values.len() as Float).sqrt();
 }
