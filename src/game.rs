@@ -80,6 +80,7 @@ impl<const M: usize> Game<M> {
             false,
         );
         let iter_time = _start.elapsed().as_secs_f32();
+        println!("{}", iter_time);
         iter_times.push(iter_time);
         if iter % 10 == 0 {
             if cfg!(feature = "GPU") {

@@ -9,7 +9,7 @@ use crate::strategy::{AbstractStrategy, RegularStrategy, Strategy};
 use crate::vector::{Float, Vector};
 use itertools::Itertools;
 use poker::Suit::*;
-use poker::{Card, Suit};
+use poker::{box_cards, Card, Suit};
 use rayon::iter::IntoParallelRefMutIterator;
 use rayon::iter::ParallelIterator;
 use std::collections::HashSet;
@@ -503,24 +503,70 @@ impl<const M: usize> State<M> {
         assert_eq!(self.sbbet, self.bbbet);
         let bet = self.sbbet;
 
-        let sorted = &evaluator.vectorized_eval(communal_cards);
-        let mut groups = vec![];
-        let mut current = vec![sorted[0] & 2047];
-        for &eval in sorted[1..1326].iter() {
-            if eval & 2048 > 0 {
-                groups.push(current);
-                current = vec![];
-            }
-            current.push(eval & 2047);
-        }
-        assert!(!current.is_empty());
-        groups.push(current);
+        // let sorted = &evaluator.vectorized_eval(communal_cards);
+        // let mut groups = vec![];
+        // let mut current = vec![sorted[0] & 2047];
+        // for &eval in sorted[1..1326].iter() {
+        //     if eval & 2048 > 0 {
+        //         groups.push(current);
+        //         current = vec![];
+        //     }
+        //     current.push(eval & 2047);
+        // }
+        // assert!(!current.is_empty());
+        // groups.push(current);
+
+        let eval = poker::Evaluator::new();
+        let cc = evaluator.u64_to_cards(communal_cards);
+
+        let sorted = evaluator
+            .card_order()
+            .clone()
+            .into_iter()
+            .enumerate()
+            .map(|(i, hand)| {
+                let h = evaluator.u64_to_cards(hand);
+                if hand & communal_cards > 0 {
+                    (poker::Eval::WORST, i as u16)
+                } else {
+                    let combined = box_cards!(cc, h);
+                    (
+                        eval.evaluate(combined).expect("Failed to evaluate"),
+                        i as u16,
+                    )
+                }
+            })
+            .sorted()
+            .collect::<Vec<_>>();
+
+        // let sorted = evaluator
+        //     .card_order()
+        //     .into_iter()
+        //     .enumerate()
+        //     .map(|(i, hand)| {
+        //         if hand & communal_cards > 0 {
+        //             (poker::Eval::WORST, i as u16)
+        //         } else {
+        //             (
+        //                 *evaluator.all_evals.get(hand | communal_cards).unwrap(),
+        //                 i as u16,
+        //             )
+        //         }
+        //     })
+        //     .sorted()
+        //     .collect::<Vec<_>>();
+        //
+        let groupss = sorted
+            .group_by(|&(a, _), &(b, _)| a == b)
+            .map(|e| e.into_iter().map(|a| a.1).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        //assert_eq!(groups, groupss);
 
         let mut collisions = [0.0; 52];
 
         let mut cumulative = 0.0;
 
-        for group in groups.iter() {
+        for group in groupss.iter() {
             let mut current_cumulative = 0.0;
 
             let mut current_collisions = [0.0; 52];
@@ -545,7 +591,7 @@ impl<const M: usize> State<M> {
 
         let mut cumulative = 0.0;
 
-        for group in groups.iter().rev() {
+        for group in groupss.iter().rev() {
             let mut current_cumulative = 0.0;
 
             let mut current_collisions = [0.0; 52];

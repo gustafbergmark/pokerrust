@@ -1,7 +1,6 @@
+#![feature(slice_group_by)]
 use crate::game::Game;
 use crate::vector::Float;
-use std::ffi::c_float;
-use std::time::Instant;
 
 mod builder;
 mod combination_map;

@@ -1,6 +1,6 @@
 use crate::combination_map::CombinationMap;
 use itertools::Itertools;
-use poker::{box_cards, Card};
+use poker::{box_cards, Card, Eval};
 use rayon::prelude::*;
 use std::collections::HashMap;
 
@@ -10,6 +10,7 @@ pub struct Evaluator<const M: usize> {
     // for each gpu thread and last 256 is end next group index for each gpu thread
     card_order: Vec<u64>,
     card_indexes: Vec<u16>,
+    pub all_evals: CombinationMap<Eval, 52, 7>,
     vectorized_eval: CombinationMap<Vec<u16>, 52, 5>,
     collisions: CombinationMap<Vec<u16>, 52, 5>,
     abstractions: CombinationMap<Vec<u16>, 52, 5>,
@@ -38,12 +39,12 @@ impl<const M: usize> Evaluator<M> {
             .map(|cards| card_nums.get(&cards[0]).unwrap() | card_nums.get(&cards[1]).unwrap())
             .sorted()
             .collect();
+        let evaluator = poker::Evaluator::new();
 
         let (vectorized_eval, collisions, abstractions) =
             /*match std::fs::read("./files/eval_small.bin") {
                 Ok(eval) => bincode::deserialize(&eval).expect("Failed to deserialize"),
                 Err(_) =>*/ {
-                    let evaluator = poker::Evaluator::new();
                     // For full game
                     //let deck = Card::generate_deck();
 
@@ -170,9 +171,17 @@ impl<const M: usize> Evaluator<M> {
             }
         }
         assert_eq!(card_indexes.len(), 51 * 52);
+        let mut all_evals = CombinationMap::new();
+        let deck = Card::generate_deck().take(3).collect::<Vec<_>>();
+        for hand in Card::generate_deck().skip(3).combinations(4) {
+            let hand = box_cards!(deck, hand);
+            let num_hand = Self::cards_to_u64_inner(&hand, &card_nums);
+            all_evals.insert(num_hand, evaluator.evaluate(hand).expect("failed"));
+        }
 
         Evaluator {
             card_order,
+            all_evals,
             card_indexes,
             vectorized_eval,
             collisions,
